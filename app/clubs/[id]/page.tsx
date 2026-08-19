@@ -1,22 +1,39 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Sidebar from "@/components/Sidebar";
 import CoffeeChatDrawer from "@/components/CoffeeChatDrawer";
 import { getSupabase } from "@/lib/supabase";
 import { scoreClubDetailed } from "@/lib/rank";
+import { clubPrestige } from "@/lib/prestige";
 import { colorFor, initials, monogram } from "@/lib/ui";
 import type {
   Club,
   ClubIntel,
   Member,
+  PlacementFirm,
   Profile,
   RedditPost,
   UserConnection,
 } from "@/lib/types";
 import { useSchool } from "@/components/SchoolProvider";
 import { schoolMatches, schoolShortLabel } from "@/lib/school";
+import {
+  isCornellProjectTeam,
+  projectTeamTracks,
+  scrubDatesToTbd,
+  splitProcessStep,
+  type TimelineStep,
+  type TimelineTrack,
+} from "@/lib/recruitment-timeline";
+
+type PlacementChip = {
+  firm: string;
+  kinds: string[];
+  source?: string;
+  count: number;
+};
 
 function linkedinConnect(m: Member, club: Club) {
   if (m.linkedin_url) return m.linkedin_url;
@@ -121,6 +138,7 @@ export default function ClubDetail({
   const [active, setActive] = useState<Member | null>(null);
   const [loading, setLoading] = useState(true);
   const [wrongSchool, setWrongSchool] = useState(false);
+  const [recruitTrack, setRecruitTrack] = useState<string>("first-year");
 
   useEffect(() => {
     if (!ready) return;
@@ -165,6 +183,124 @@ export default function ClubDetail({
       setLoading(false);
     })();
   }, [id, school, ready]);
+
+  // Hooks must run before any early return (previous crash was useMemo after loading gate).
+  const placementChips = useMemo(() => {
+    const byFirm = new Map<string, PlacementChip>();
+    for (const p of (intel?.placements ?? []) as PlacementFirm[]) {
+      const firm = (p.firm ?? "").trim();
+      if (!firm) continue;
+      // Skip school / org noise
+      if (/cornell|bowers|college of/i.test(firm)) continue;
+      const key = firm.toLowerCase();
+      const existing = byFirm.get(key);
+      const kinds = p.kinds ?? [];
+      const add = Math.max(1, p.count ?? 1);
+      if (existing) {
+        existing.count += add;
+        for (const k of kinds) {
+          if (!existing.kinds.includes(k)) existing.kinds.push(k);
+        }
+        if (!existing.source && p.source) existing.source = p.source;
+      } else {
+        byFirm.set(key, {
+          firm,
+          kinds: [...kinds],
+          source: p.source,
+          count: add,
+        });
+      }
+    }
+    if (byFirm.size < 6 && club) {
+      try {
+        const prestige = clubPrestige(
+          members,
+          profile?.career_goal ?? null,
+          profile?.target_clubs ?? [],
+          intel?.placements ?? [],
+          club
+        );
+        for (const hit of prestige.hits) {
+          const key = hit.firm.toLowerCase();
+          if (!byFirm.has(key)) {
+            byFirm.set(key, {
+              firm: hit.firm,
+              kinds: [],
+              source: undefined,
+              count: 1,
+            });
+          } else {
+            // prestige hit reinforces but don't double-count if already have a count
+          }
+        }
+      } catch {
+        /* prestige is best-effort */
+      }
+    }
+    return [...byFirm.values()]
+      .sort((a, b) => b.count - a.count || a.firm.localeCompare(b.firm))
+      .slice(0, 14);
+  }, [intel?.placements, members, profile, club]);
+
+  const isProjectTeam = isCornellProjectTeam(club);
+
+  const recruitmentTracks = useMemo((): TimelineTrack[] => {
+    if (isProjectTeam) return projectTeamTracks();
+
+    const process = intel?.interview?.process;
+    let steps: TimelineStep[] = [];
+    if (Array.isArray(process) && process.length > 0) {
+      // Non-project clubs: keep step labels, scrub unverified dates → TBD
+      steps = scrubDatesToTbd(process.map(splitProcessStep));
+    } else {
+      const legacy: TimelineStep[] = [];
+      if (intel?.interview?.rounds != null) {
+        legacy.push({
+          label: `${intel.interview.rounds} rounds`,
+          detail: `${intel.interview.rounds} interview rounds total.`,
+          when: "TBD",
+        });
+      }
+      if (intel?.interview?.technical_round !== undefined) {
+        legacy.push({
+          label: "Technical",
+          detail: intel.interview.technical_round
+            ? "Includes a technical component."
+            : "No technical round.",
+          when: "TBD",
+        });
+      }
+      if (intel?.interview?.case_format) {
+        legacy.push({
+          label: "Case format",
+          detail: intel.interview.case_format,
+          when: "TBD",
+        });
+      }
+      if (intel?.interview?.difficulty) {
+        legacy.push({
+          label: "Difficulty",
+          detail: intel.interview.difficulty,
+          when: "TBD",
+        });
+      }
+      steps = legacy;
+    }
+
+    if (!steps.length) return [];
+    return [
+      {
+        id: "club",
+        title: "Recruitment process",
+        subtitle: "Dates TBD until confirmed on the club site for FA26",
+        steps,
+      },
+    ];
+  }, [isProjectTeam, intel?.interview]);
+
+  const activeRecruitTrack =
+    recruitmentTracks.find((t) => t.id === recruitTrack) ?? recruitmentTracks[0] ?? null;
+  const timelineSteps = activeRecruitTrack?.steps ?? [];
 
   const shell = (content: React.ReactNode) => (
     <div style={{ display: "flex", minHeight: "100vh", background: "#FAFAF7", position: "relative" }}>
@@ -225,27 +361,6 @@ export default function ClubDetail({
     intel?.vibe?.social_energy && { label: "Social energy", val: intel.vibe.social_energy },
   ].filter(Boolean) as { label: string; val: string }[];
 
-  const interviewSteps = [
-    intel?.interview?.rounds !== undefined && {
-      label: "Rounds",
-      tip: `${intel.interview.rounds} rounds total.`,
-    },
-    intel?.interview?.technical_round !== undefined && {
-      label: "Technical round",
-      tip: intel.interview.technical_round
-        ? "Yes — expect a technical component."
-        : "No technical round.",
-    },
-    intel?.interview?.case_format && {
-      label: "Case format",
-      tip: intel.interview.case_format,
-    },
-    intel?.interview?.difficulty && {
-      label: "Difficulty",
-      tip: intel.interview.difficulty,
-    },
-  ].filter(Boolean) as { label: string; tip: string }[];
-
   const positive = intel?.reddit_sentiment?.vibe === "positive";
   const sentimentLabel =
     intel?.reddit_sentiment?.vibe === "positive"
@@ -253,6 +368,21 @@ export default function ClubDetail({
       : intel?.reddit_sentiment?.vibe === "negative"
       ? "Mostly Negative"
       : "Mixed";
+
+  const hasReddit =
+    Boolean(intel?.reddit_sentiment?.summary) || reddit.length > 0;
+  const hasX =
+    Boolean(intel?.x_sentiment?.summary) ||
+    (intel?.x_sentiment?.posts?.length ?? 0) > 0;
+  const hasPlacements = placementChips.length > 0;
+  const showSocialRow = hasReddit || hasX || hasPlacements;
+  const hasRecruitment =
+    recruitmentTracks.length > 0 ||
+    Boolean(intel?.interview?.tips?.length) ||
+    Boolean(intel?.interview?.roles?.length) ||
+    Boolean(intel?.interview?.tracks_roles?.length) ||
+    Boolean(intel?.interview?.format_note) ||
+    Boolean(intel?.interview?.notes);
 
   return shell(
     <>
@@ -477,115 +607,225 @@ export default function ClubDetail({
           </SectionCard>
         )}
 
-        {(intel?.reddit_sentiment?.summary || reddit.length > 0) && (
-          <SectionCard title="Reddit Sentiment">
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
-              <div style={{ flex: 1, height: 6, borderRadius: 3, background: "#E8E8E3", overflow: "hidden" }}>
-                <div
-                  style={{
-                    width: positive ? "74%" : "50%",
-                    height: "100%",
-                    borderRadius: 3,
-                    background: positive
-                      ? "linear-gradient(90deg, #22C55E 0%, #3B3BFF 100%)"
-                      : "linear-gradient(90deg, #F59E0B 0%, #3B3BFF 100%)",
-                  }}
-                />
-              </div>
-              <span
-                style={{
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: positive ? "#22C55E" : "#F59E0B",
-                }}
-              >
-                {sentimentLabel}
-              </span>
-            </div>
-            {intel?.reddit_sentiment?.summary && (
-              <p style={{ fontSize: 13, lineHeight: 1.6, color: "#4A4A44", marginBottom: 12 }}>
-                {intel.reddit_sentiment.summary}
-              </p>
-            )}
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {reddit.slice(0, 3).map((r) => (
-                <a
-                  key={r.id}
-                  href={r.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{
-                    background: "#FAFAF7",
-                    border: "1px solid #E8E8E3",
-                    borderRadius: 10,
-                    padding: "12px 14px",
-                    textDecoration: "none",
-                    display: "block",
-                  }}
-                >
-                  <p style={{ fontSize: 12, lineHeight: 1.6, color: "#4A4A44", marginBottom: 8 }}>
-                    {r.title}
-                  </p>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontSize: 11, color: "#8C8C85" }}>↑ {r.score}</span>
-                    {r.subreddit && (
-                      <span style={{ fontSize: 11, color: "#3B3BFF", fontWeight: 500 }}>
-                        r/{r.subreddit.replace(/^r\//, "")}
-                      </span>
-                    )}
-                    <span style={{ marginLeft: "auto", fontSize: 11, color: "#B0B0A8" }}>↗</span>
-                  </div>
-                </a>
-              ))}
-            </div>
-          </SectionCard>
-        )}
-
-        {intel?.x_sentiment && (intel.x_sentiment.summary || (intel.x_sentiment.posts?.length ?? 0) > 0) && (
-          <SectionCard
-            title="Live X Chatter"
-            badge={
-              <span
-                style={{
-                  background: "#F4F4F0",
-                  border: "1px solid #E8E8E3",
-                  borderRadius: 6,
-                  padding: "1px 8px",
-                  fontSize: 10,
-                  fontWeight: 600,
-                  color: "#4A4A44",
-                }}
-              >
-                via Grok x_search
-              </span>
-            }
+        {showSocialRow && (
+          <div
+            style={{
+              gridColumn: "1 / -1",
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 16,
+              alignItems: "stretch",
+            }}
           >
-            {intel.x_sentiment.summary && (
-              <p style={{ fontSize: 13, lineHeight: 1.6, color: "#4A4A44", marginBottom: 12 }}>
-                {intel.x_sentiment.summary}
-              </p>
-            )}
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {(intel.x_sentiment.posts ?? []).slice(0, 3).map((p, i) => (
-                <div
-                  key={i}
-                  style={{
-                    background: "#FAFAF7",
-                    border: "1px solid #E8E8E3",
-                    borderRadius: 10,
-                    padding: "12px 14px",
-                  }}
-                >
-                  <p style={{ fontSize: 12, lineHeight: 1.6, color: "#4A4A44", marginBottom: p.handle ? 6 : 0 }}>
-                    &quot;{p.text}&quot;
-                  </p>
-                  {p.handle && (
-                    <span style={{ fontSize: 11, color: "#3B3BFF", fontWeight: 500 }}>{p.handle}</span>
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {hasReddit && (
+                <SectionCard title="Reddit Sentiment">
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+                    <div
+                      style={{
+                        flex: 1,
+                        height: 6,
+                        borderRadius: 3,
+                        background: "#E8E8E3",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: positive ? "74%" : "50%",
+                          height: "100%",
+                          borderRadius: 3,
+                          background: positive
+                            ? "linear-gradient(90deg, #22C55E 0%, #3B3BFF 100%)"
+                            : "linear-gradient(90deg, #F59E0B 0%, #3B3BFF 100%)",
+                        }}
+                      />
+                    </div>
+                    <span
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: positive ? "#22C55E" : "#F59E0B",
+                      }}
+                    >
+                      {sentimentLabel}
+                    </span>
+                  </div>
+                  {intel?.reddit_sentiment?.summary && (
+                    <p
+                      style={{
+                        fontSize: 13,
+                        lineHeight: 1.55,
+                        color: "#4A4A44",
+                        marginBottom: reddit.length ? 10 : 0,
+                        display: "-webkit-box",
+                        WebkitLineClamp: 3,
+                        WebkitBoxOrient: "vertical" as const,
+                        overflow: "hidden",
+                      }}
+                    >
+                      {intel.reddit_sentiment.summary}
+                    </p>
                   )}
-                </div>
-              ))}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {reddit.slice(0, 1).map((r) => (
+                      <a
+                        key={r.id}
+                        href={r.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{
+                          background: "#FAFAF7",
+                          border: "1px solid #E8E8E3",
+                          borderRadius: 10,
+                          padding: "10px 12px",
+                          textDecoration: "none",
+                          display: "block",
+                        }}
+                      >
+                        <p
+                          style={{
+                            fontSize: 12,
+                            lineHeight: 1.5,
+                            color: "#4A4A44",
+                            marginBottom: 6,
+                            display: "-webkit-box",
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: "vertical" as const,
+                            overflow: "hidden",
+                          }}
+                        >
+                          {r.title}
+                        </p>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 11, color: "#8C8C85" }}>↑ {r.score}</span>
+                          {r.subreddit && (
+                            <span style={{ fontSize: 11, color: "#3B3BFF", fontWeight: 500 }}>
+                              r/{r.subreddit.replace(/^r\//, "")}
+                            </span>
+                          )}
+                          <span style={{ marginLeft: "auto", fontSize: 11, color: "#B0B0A8" }}>↗</span>
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                </SectionCard>
+              )}
+
+              {(hasPlacements || hasReddit) && (
+                <SectionCard title="Placements">
+                  {hasPlacements ? (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {placementChips.map((p) => {
+                        const inner = (
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              background: "#FAFAF7",
+                              border: "1px solid #E8E8E3",
+                              borderRadius: 8,
+                              padding: "6px 10px",
+                              fontSize: 12,
+                              fontWeight: 500,
+                              color: "#0F0F0E",
+                            }}
+                          >
+                            {p.firm}
+                            <span
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 700,
+                                color: "#3B3BFF",
+                              }}
+                            >
+                              {p.count}
+                            </span>
+                          </span>
+                        );
+                        return p.source ? (
+                          <a
+                            key={p.firm}
+                            href={p.source}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ textDecoration: "none" }}
+                          >
+                            {inner}
+                          </a>
+                        ) : (
+                          <span key={p.firm}>{inner}</span>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p style={{ fontSize: 13, lineHeight: 1.6, color: "#8C8C85" }}>
+                      No placement signals yet for this club.
+                    </p>
+                  )}
+                </SectionCard>
+              )}
             </div>
-          </SectionCard>
+
+            {hasX ? (
+              <SectionCard
+                title="Live X Chatter"
+                badge={
+                  <span
+                    style={{
+                      background: "#F4F4F0",
+                      border: "1px solid #E8E8E3",
+                      borderRadius: 6,
+                      padding: "1px 8px",
+                      fontSize: 10,
+                      fontWeight: 600,
+                      color: "#4A4A44",
+                    }}
+                  >
+                    via Grok x_search
+                  </span>
+                }
+              >
+                {intel?.x_sentiment?.summary && (
+                  <p style={{ fontSize: 13, lineHeight: 1.6, color: "#4A4A44", marginBottom: 12 }}>
+                    {intel.x_sentiment.summary}
+                  </p>
+                )}
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {(intel?.x_sentiment?.posts ?? []).slice(0, 3).map((p, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        background: "#FAFAF7",
+                        border: "1px solid #E8E8E3",
+                        borderRadius: 10,
+                        padding: "12px 14px",
+                      }}
+                    >
+                      <p
+                        style={{
+                          fontSize: 12,
+                          lineHeight: 1.6,
+                          color: "#4A4A44",
+                          marginBottom: p.handle ? 6 : 0,
+                        }}
+                      >
+                        &quot;{p.text}&quot;
+                      </p>
+                      {p.handle && (
+                        <span style={{ fontSize: 11, color: "#3B3BFF", fontWeight: 500 }}>
+                          {p.handle}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </SectionCard>
+            ) : (
+              <div />
+            )}
+          </div>
         )}
 
         {intel?.vibe && Object.keys(intel.vibe).length > 0 && (
@@ -669,105 +909,300 @@ export default function ClubDetail({
           </SectionCard>
         )}
 
-        {interviewSteps.length > 0 && (
-          <SectionCard title="Interview Intel" full>
-            {intel?.interview?.technical_round !== undefined && (
-              <div style={{ display: "flex", gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
+        {hasRecruitment && (
+          <SectionCard
+            title="Recruitment timeline"
+            full
+            badge={
+              isProjectTeam ? (
                 <span
                   style={{
-                    background: intel.interview.technical_round ? "#FFF3CD" : "#E8F8EE",
-                    color: intel.interview.technical_round ? "#856404" : "#166534",
+                    background: "#EBEBFF",
+                    color: "#3B3BFF",
                     borderRadius: 6,
-                    padding: "3px 10px",
-                    fontSize: 12,
+                    padding: "1px 8px",
+                    fontSize: 10,
                     fontWeight: 600,
                   }}
                 >
-                  Technical round: {intel.interview.technical_round ? "Yes" : "No"}
+                  Engineering Project Teams
                 </span>
-                {intel.interview.difficulty && (
-                  <span
-                    style={{
-                      background: "#FFF3CD",
-                      color: "#856404",
-                      borderRadius: 6,
-                      padding: "3px 10px",
-                      fontSize: 12,
-                      fontWeight: 600,
-                      textTransform: "capitalize",
-                    }}
-                  >
-                    Difficulty: {intel.interview.difficulty}
-                  </span>
-                )}
+              ) : undefined
+            }
+          >
+            {isProjectTeam && (
+              <p
+                style={{
+                  fontSize: 13,
+                  lineHeight: 1.55,
+                  color: "#4A4A44",
+                  marginBottom: 14,
+                }}
+              >
+                Two-step apply:{" "}
+                <a
+                  href="https://www.engineering.cornell.edu/engineering-student-project-teams/"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: "#3B3BFF", fontWeight: 600 }}
+                >
+                  General Project Team Application
+                </a>{" "}
+                + this team&apos;s own application. Fall uses separate deadlines for
+                upperclass vs first-year/transfer.
+              </p>
+            )}
+
+            {recruitmentTracks.length > 1 && (
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 8,
+                  marginBottom: 16,
+                }}
+              >
+                {recruitmentTracks.map((track) => {
+                  const active = (activeRecruitTrack?.id ?? "") === track.id;
+                  return (
+                    <button
+                      key={track.id}
+                      type="button"
+                      onClick={() => setRecruitTrack(track.id)}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 10,
+                        border: `1.5px solid ${active ? "#3B3BFF" : "#E8E8E3"}`,
+                        background: active ? "#EBEBFF" : "#FFFFFF",
+                        color: active ? "#3B3BFF" : "#4A4A44",
+                        cursor: "pointer",
+                        textAlign: "left",
+                        fontFamily: "'Inter', sans-serif",
+                      }}
+                    >
+                      <div style={{ fontSize: 12, fontWeight: 700 }}>{track.title}</div>
+                      {track.subtitle && (
+                        <div style={{ fontSize: 10, color: active ? "#6B6BFF" : "#8C8C85", marginTop: 2 }}>
+                          {track.subtitle}
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             )}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: `repeat(${Math.min(interviewSteps.length, 4)}, 1fr)`,
-                gap: 12,
-              }}
-            >
-              {interviewSteps.map((step, i) => (
-                <div key={step.label} style={{ position: "relative" }}>
-                  <div
-                    style={{
-                      background: i === 0 ? "#3B3BFF" : "#FAFAF7",
-                      border: `1.5px solid ${i === 0 ? "#3B3BFF" : "#E8E8E3"}`,
-                      borderRadius: 12,
-                      padding: "14px 16px",
-                      height: "100%",
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: 22,
-                        height: 22,
-                        borderRadius: "50%",
-                        background: i === 0 ? "#FFFFFF" : "#E8E8E3",
-                        color: i === 0 ? "#3B3BFF" : "#8C8C85",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 10,
-                        fontWeight: 700,
-                        marginBottom: 8,
-                      }}
-                    >
-                      {i + 1}
+
+            {activeRecruitTrack?.subtitle && recruitmentTracks.length === 1 && (
+              <p style={{ fontSize: 12, color: "#8C8C85", marginBottom: 12 }}>
+                {activeRecruitTrack.subtitle}
+              </p>
+            )}
+
+            {timelineSteps.length > 0 && (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: `repeat(${Math.min(timelineSteps.length, 5)}, minmax(0, 1fr))`,
+                  gap: 12,
+                  marginBottom:
+                    intel?.interview?.tips?.length ||
+                    intel?.interview?.roles?.length ||
+                    intel?.interview?.tracks_roles?.length ||
+                    intel?.interview?.format_note ||
+                    intel?.interview?.notes
+                      ? 20
+                      : 0,
+                }}
+              >
+                {timelineSteps.map((step, i) => {
+                  const first = i === 0;
+                  return (
+                    <div key={`${step.label}-${i}`} style={{ position: "relative", minWidth: 0 }}>
+                      <div
+                        style={{
+                          background: first ? "#3B3BFF" : "#FFFFFF",
+                          border: `1.5px solid ${first ? "#3B3BFF" : "#E8E8E3"}`,
+                          borderRadius: 14,
+                          padding: "16px 14px",
+                          height: "100%",
+                          boxShadow: first ? "0 6px 18px rgba(59,59,255,0.18)" : "none",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 8,
+                            marginBottom: 10,
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: 24,
+                              height: 24,
+                              borderRadius: "50%",
+                              background: first ? "#FFFFFF" : "#EBEBFF",
+                              color: "#3B3BFF",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: 11,
+                              fontWeight: 700,
+                              flexShrink: 0,
+                            }}
+                          >
+                            {i + 1}
+                          </div>
+                          {step.when && (
+                            <span
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 600,
+                                color: first ? "rgba(255,255,255,0.85)" : "#8C8C85",
+                                textAlign: "right",
+                                lineHeight: 1.3,
+                              }}
+                            >
+                              {step.when}
+                            </span>
+                          )}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 700,
+                            color: first ? "#FFFFFF" : "#0F0F0E",
+                            marginBottom: 6,
+                            letterSpacing: "-0.01em",
+                            lineHeight: 1.3,
+                          }}
+                        >
+                          {step.label}
+                        </div>
+                        {step.detail !== step.label && (
+                          <div
+                            style={{
+                              fontSize: 11,
+                              lineHeight: 1.5,
+                              color: first ? "rgba(255,255,255,0.82)" : "#8C8C85",
+                            }}
+                          >
+                            {step.detail}
+                          </div>
+                        )}
+                      </div>
+                      {i < timelineSteps.length - 1 && (
+                        <div
+                          style={{
+                            position: "absolute",
+                            top: 26,
+                            right: -10,
+                            color: "#C4C4BC",
+                            fontSize: 14,
+                            fontWeight: 600,
+                            zIndex: 1,
+                          }}
+                        >
+                          →
+                        </div>
+                      )}
                     </div>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 700,
-                        color: i === 0 ? "#FFFFFF" : "#0F0F0E",
-                        marginBottom: 6,
-                      }}
-                    >
-                      {step.label}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        lineHeight: 1.5,
-                        color: i === 0 ? "rgba(255,255,255,0.85)" : "#8C8C85",
-                      }}
-                    >
-                      {step.tip}
-                    </div>
-                  </div>
-                  {i < interviewSteps.length - 1 && (
-                    <div style={{ position: "absolute", top: 20, right: -10, color: "#B0B0A8", fontSize: 12 }}>
-                      →
-                    </div>
-                  )}
+                  );
+                })}
+              </div>
+            )}
+
+            {(intel?.interview?.roles?.length || intel?.interview?.tracks_roles?.length) && (
+              <div style={{ marginBottom: 16 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: "#8C8C85",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    marginBottom: 8,
+                  }}
+                >
+                  Tracks / roles
                 </div>
-              ))}
-            </div>
-            {intel?.interview?.notes && (
-              <p style={{ fontSize: 13, lineHeight: 1.6, color: "#4A4A44", marginTop: 16 }}>
-                {intel.interview.notes}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {(intel?.interview?.roles ?? intel?.interview?.tracks_roles ?? []).map((role) => (
+                    <span
+                      key={role}
+                      style={{
+                        background: "#EBEBFF",
+                        color: "#3B3BFF",
+                        borderRadius: 8,
+                        padding: "5px 10px",
+                        fontSize: 12,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {role}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {!!intel?.interview?.tips?.length && (
+              <div style={{ marginBottom: intel?.interview?.format_note || intel?.interview?.notes ? 14 : 0 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: "#8C8C85",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    marginBottom: 8,
+                  }}
+                >
+                  Prep tips
+                </div>
+                <ul
+                  style={{
+                    margin: 0,
+                    padding: 0,
+                    listStyle: "none",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                  }}
+                >
+                  {intel!.interview!.tips!.slice(0, 5).map((tip, i) => (
+                    <li
+                      key={i}
+                      style={{
+                        fontSize: 13,
+                        lineHeight: 1.55,
+                        color: "#4A4A44",
+                        paddingLeft: 14,
+                        position: "relative",
+                      }}
+                    >
+                      <span
+                        style={{
+                          position: "absolute",
+                          left: 0,
+                          top: 8,
+                          width: 6,
+                          height: 6,
+                          borderRadius: "50%",
+                          background: "#3B3BFF",
+                        }}
+                      />
+                      {tip}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {(intel?.interview?.format_note || intel?.interview?.notes) && (
+              <p style={{ fontSize: 12, lineHeight: 1.55, color: "#8C8C85", marginTop: 4 }}>
+                {intel.interview.format_note || intel.interview.notes}
               </p>
             )}
           </SectionCard>

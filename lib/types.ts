@@ -49,6 +49,23 @@ export type InterviewIntel = {
   case_format?: string;
   notes?: string;
   difficulty?: string;
+  /** Chronological recruitment / interview steps (current pack format). */
+  process?: string[];
+  tips?: string[];
+  roles?: string[];
+  tracks_roles?: string[];
+  sources?: string[];
+  format_note?: string;
+  eligibility?: string;
+  class_size?: string;
+};
+
+export type PlacementFirm = {
+  firm: string;
+  source?: string;
+  kinds?: string[];
+  /** How many members/alumni associated with this firm */
+  count?: number;
 };
 
 export type RedditSentiment = {
@@ -82,7 +99,7 @@ export type ClubIntel = {
   vibe: VibeRead;
   x_sentiment: XSentiment;
   sources: { label: string; url: string }[];
-  placements?: { firm: string; source?: string }[] | null;
+  placements?: PlacementFirm[] | null;
 };
 
 export type Member = {

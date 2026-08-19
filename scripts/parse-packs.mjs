@@ -42,7 +42,10 @@ export function parsePackMarkdown(text, { school = "Cornell" } = {}) {
     const website = p.match(/^WEBSITE: (.+)/m)?.[1]?.trim() || null;
     const roster = p.match(/^ROSTER_SOURCE: (.+)/m)?.[1]?.trim() || null;
     const vibeMatch = p.match(/VIBE: (\{[\s\S]*?\})\nMEMBERS:/);
-    const memMatch = p.match(/MEMBERS: (\[[\s\S]*\])\s*$/);
+    // MEMBERS may be followed by top-level INTERVIEW: — strip interview before members $ anchor
+    const interviewMatchEarly = p.match(/\nINTERVIEW: (\{[\s\S]*\})\s*$/);
+    const bodyForMembers = interviewMatchEarly ? p.slice(0, interviewMatchEarly.index) : p;
+    const memMatch = bodyForMembers.match(/MEMBERS: (\[[\s\S]*\])\s*$/);
     let vibeRaw = {};
     let members = [];
     try {
