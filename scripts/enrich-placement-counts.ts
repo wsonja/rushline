@@ -196,9 +196,10 @@ async function main() {
       }
     }
 
-    const placements = [...merged.values()]
-      .sort((a, b) => b.count - a.count || a.firm.localeCompare(b.firm))
-      .slice(0, 20);
+    // No hard cap — UI shows prestige top 10 + expands to the rest.
+    const placements = [...merged.values()].sort(
+      (a, b) => b.count - a.count || a.firm.localeCompare(b.firm)
+    );
 
     if (placements.length) withFirms += 1;
 

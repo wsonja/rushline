@@ -34,3 +34,24 @@ export function initials(name: string): string {
 export function displayScore(raw: number): number {
   return Math.max(0, Math.min(100, Math.round(raw)));
 }
+
+/** Club size / roster headcount for UI — never show exact small-or-precise counts. */
+export function formatApproxHeadcount(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return "<10";
+  if (n < 5) return "<10";
+  return `~${Math.round(n / 10) * 10}`;
+}
+
+/**
+ * Soften student/member headcounts embedded in vibe copy
+ * (e.g. "~92 students" → "~90 students", "77 members" → "~80 members").
+ */
+export function softenHeadcountPhrases(text: string): string {
+  return text.replace(
+    /~?(\d+)\+?\s*(students?|members?|people|person)\b/gi,
+    (_m, num: string, unit: string) => {
+      const approx = formatApproxHeadcount(Number(num));
+      return `${approx} ${unit}`;
+    }
+  );
+}

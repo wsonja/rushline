@@ -6,8 +6,18 @@ import Sidebar from "@/components/Sidebar";
 import CoffeeChatDrawer from "@/components/CoffeeChatDrawer";
 import { getSupabase } from "@/lib/supabase";
 import { scoreClubDetailed } from "@/lib/rank";
-import { clubPrestige } from "@/lib/prestige";
-import { colorFor, initials, monogram } from "@/lib/ui";
+import { clubPrestige, firmPrestigePoints } from "@/lib/prestige";
+import {
+  rankPeopleToMeet,
+  sortMembersForMeet,
+} from "@/lib/people-to-meet";
+import {
+  colorFor,
+  formatApproxHeadcount,
+  initials,
+  monogram,
+  softenHeadcountPhrases,
+} from "@/lib/ui";
 import type {
   Club,
   ClubIntel,
@@ -139,6 +149,7 @@ export default function ClubDetail({
   const [loading, setLoading] = useState(true);
   const [wrongSchool, setWrongSchool] = useState(false);
   const [recruitTrack, setRecruitTrack] = useState<string>("first-year");
+  const [placementsExpanded, setPlacementsExpanded] = useState(false);
 
   useEffect(() => {
     if (!ready) return;
@@ -237,10 +248,19 @@ export default function ClubDetail({
         /* prestige is best-effort */
       }
     }
-    return [...byFirm.values()]
-      .sort((a, b) => b.count - a.count || a.firm.localeCompare(b.firm))
-      .slice(0, 14);
+    // Full list kept for expand — UI shows top 10 until expanded.
+    return [...byFirm.values()].sort(
+      (a, b) =>
+        firmPrestigePoints(b.firm) - firmPrestigePoints(a.firm) ||
+        b.count - a.count ||
+        a.firm.localeCompare(b.firm)
+    );
   }, [intel?.placements, members, profile, club]);
+
+  const visiblePlacementChips = placementsExpanded
+    ? placementChips
+    : placementChips.slice(0, 10);
+  const hiddenPlacementCount = Math.max(0, placementChips.length - 10);
 
   const isProjectTeam = isCornellProjectTeam(club);
 
@@ -344,10 +364,8 @@ export default function ClubDetail({
       </div>
     );
 
-  const goalMatched = members.filter((m) =>
-    profile?.career_goal ? m.career_tags?.includes(profile.career_goal) : false
-  );
-  const peopleToMeet = (goalMatched.length ? goalMatched : members).slice(0, 3);
+  const peopleToMeet = rankPeopleToMeet(members, connections, profile);
+  const rosterSorted = sortMembersForMeet(members, connections, profile);
   const match = scoreClubDetailed(club, {
     profile,
     connections,
@@ -355,7 +373,10 @@ export default function ClubDetail({
   }).score;
 
   const vibeRows = [
-    intel?.vibe?.culture && { label: "Culture", val: intel.vibe.culture },
+    intel?.vibe?.culture && {
+      label: "Culture",
+      val: softenHeadcountPhrases(intel.vibe.culture),
+    },
     intel?.vibe?.selectivity && { label: "Selectivity", val: intel.vibe.selectivity },
     intel?.vibe?.intensity && { label: "Intensity", val: intel.vibe.intensity },
     intel?.vibe?.social_energy && { label: "Social energy", val: intel.vibe.social_energy },
@@ -465,7 +486,10 @@ export default function ClubDetail({
               {[
                 { label: "Category", val: club.category ?? "—" },
                 { label: "School", val: club.school },
-                { label: "Roster", val: `${members.length} tracked` },
+                {
+                  label: "Roster",
+                  val: `${formatApproxHeadcount(members.length)} tracked`,
+                },
                 {
                   label: "Sources",
                   val: `${(intel?.sources?.length ?? 0) + reddit.length} scraped`,
@@ -716,7 +740,7 @@ export default function ClubDetail({
                 <SectionCard title="Placements">
                   {hasPlacements ? (
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                      {placementChips.map((p) => {
+                      {visiblePlacementChips.map((p) => {
                         const inner = (
                           <span
                             style={{
@@ -758,6 +782,29 @@ export default function ClubDetail({
                           <span key={p.firm}>{inner}</span>
                         );
                       })}
+                      {hiddenPlacementCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setPlacementsExpanded((v) => !v)}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            background: "transparent",
+                            border: "1px dashed #C7C7C0",
+                            borderRadius: 8,
+                            padding: "6px 10px",
+                            fontSize: 12,
+                            fontWeight: 600,
+                            color: "#3B3BFF",
+                            cursor: "pointer",
+                            fontFamily: "'Inter', sans-serif",
+                          }}
+                        >
+                          {placementsExpanded
+                            ? "Show less"
+                            : `+${hiddenPlacementCount} more`}
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <p style={{ fontSize: 13, lineHeight: 1.6, color: "#8C8C85" }}>
@@ -1349,7 +1396,7 @@ export default function ClubDetail({
                 gap: 12,
               }}
             >
-              {members.map((m) => {
+              {rosterSorted.map((m) => {
                 const ig = instagramLink(m);
                 return (
                   <div

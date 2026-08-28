@@ -11,6 +11,8 @@ const CATEGORY_HINTS = [
   [/\bwicc\b|women in computing/i, "tech"],
   [/\bcuauv\b|auv|robo|project team/i, "tech"],
   [/appdev|hack|coding|\bcs\b/i, "tech"],
+  // CUAI vibe says "not strategy consulting" — must beat /\bconsult/i
+  [/\bcuai\b|artificial intelligence|\bml research\b|machine learning/i, "tech"],
   [/\bconsult/i, "consulting"],
   [/finance|invest|trading/i, "finance"],
   [/design|product/i, "design"],
