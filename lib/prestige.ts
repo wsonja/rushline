@@ -88,6 +88,9 @@ const IB_FIRMS: FirmEntry[] = [
   { name: "Piper Sandler", aliases: ["piper sandler"], tier: 2, points: 24, track: "finance" },
   { name: "William Blair", aliases: ["william blair"], tier: 2, points: 24, track: "finance" },
   { name: "Blackstone", aliases: ["blackstone"], tier: 1, points: 34, track: "finance" },
+  { name: "BlackRock", aliases: ["blackrock"], tier: 1, points: 32, track: "finance" },
+  { name: "American Express", aliases: ["american express", "amex"], tier: 2, points: 24, track: "finance" },
+  { name: "Capital One", aliases: ["capital one"], tier: 2, points: 22, track: "finance" },
   { name: "KKR", aliases: ["kkr"], tier: 1, points: 32, track: "finance" },
 ];
 
@@ -184,6 +187,12 @@ function memberBlob(m: Member): string {
 }
 
 export type ClubPlacement = { firm: string; source?: string };
+
+/** Raw prestige points for a firm name (0 if unknown). Used for placement chip sort. */
+export function firmPrestigePoints(firm: string): number {
+  const f = resolveFirmName(firm);
+  return f?.points ?? 0;
+}
 
 /**
  * Prestige from (1) member bios and (2) scraped club-site placements in DB.
