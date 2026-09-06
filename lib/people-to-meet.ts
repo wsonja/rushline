@@ -75,8 +75,10 @@ function cmpTuple(
   a: [number, number, number, number, number, string],
   b: [number, number, number, number, number, string]
 ): number {
-  for (let i = 0; i < 5; i++) {
-    if (a[i] !== b[i]) return a[i] - b[i];
+  const keysA = [a[0], a[1], a[2], a[3], a[4]];
+  const keysB = [b[0], b[1], b[2], b[3], b[4]];
+  for (let i = 0; i < keysA.length; i++) {
+    if (keysA[i] !== keysB[i]) return keysA[i] - keysB[i];
   }
   return a[5].localeCompare(b[5]);
 }
