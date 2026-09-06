@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import Sidebar from "@/components/Sidebar";
+import { AppShell } from "@/components/AppShell";
 import NetworkGraph, {
   type GraphLink,
   type GraphNode,
@@ -12,11 +12,9 @@ import { getSupabase } from "@/lib/supabase";
 import { linkedinSlug } from "@/lib/linkedin";
 import { scoreClubDetailed } from "@/lib/rank";
 import type { Club, Member, Profile, UserConnection } from "@/lib/types";
-import { useSchool } from "@/components/SchoolProvider";
 
 export default function NetworkPage() {
   const router = useRouter();
-  const { school, ready } = useSchool();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [clubs, setClubs] = useState<Club[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -24,38 +22,35 @@ export default function NetworkPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!ready) return;
     const sb = getSupabase();
     (async () => {
-      setLoading(true);
       const { data: userData } = await sb.auth.getUser();
       if (!userData.user) {
         router.push("/login");
         return;
       }
-      const [{ data: prof }, { data: clubRows }, connRes] = await Promise.all([
-        sb.from("profiles").select("*").eq("id", userData.user.id).maybeSingle(),
-        sb.from("clubs").select("*").eq("school", school),
-        sb
-          .from("user_connections")
-          .select("*")
-          .eq("user_id", userData.user.id),
-      ]);
-      const schoolClubs = (clubRows as Club[]) ?? [];
+      const [{ data: prof }, { data: clubRows }, connRes] =
+        await Promise.all([
+          sb.from("profiles").select("*").eq("id", userData.user.id).maybeSingle(),
+          sb.from("clubs").select("*"),
+          sb
+            .from("user_connections")
+            .select("*")
+            .eq("user_id", userData.user.id),
+        ]);
       setProfile(prof as Profile | null);
-      setClubs(schoolClubs);
+      setClubs((clubRows as Club[]) ?? []);
       setConnections(
         connRes.error ? [] : ((connRes.data as UserConnection[]) ?? [])
       );
-      const ids = schoolClubs.map((c) => c.id);
       try {
-        setMembers(ids.length ? await fetchAllMembers(sb, ids) : []);
+        setMembers(await fetchAllMembers(sb));
       } catch {
         setMembers([]);
       }
       setLoading(false);
     })();
-  }, [router, school, ready]);
+  }, [router]);
 
   const { nodes, links, target, path } = useMemo(() => {
     const nodes: GraphNode[] = [];
@@ -81,6 +76,7 @@ export default function NetworkPage() {
       connections.map((c) => c.connected_linkedin_slug.toLowerCase())
     );
 
+    // Prefer current member on a real connection path; then any current; then alum.
     let pathMember: Member | null = null;
     if (target) {
       const targetMembers = members.filter((m) => m.club_id === target.id);
@@ -127,36 +123,37 @@ export default function NetworkPage() {
   }, [clubs, members, profile, connections]);
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "#FAFAF7" }}>
-      <Sidebar />
-      <main style={{ flex: 1, height: "100vh", overflowY: "auto", padding: "40px 48px" }}>
+    <AppShell
+      counts={{ web: connections.length }}
+      copilotScope="Reads the graph on this page. It won't invent edges that aren't imported."
+    >
+      <main style={{ height: "100vh", overflowY: "auto", padding: "32px 34px" }}>
         <div style={{ marginBottom: 20 }}>
           <h1
             style={{
-              fontFamily: "'Newsreader', serif",
-              fontSize: 34,
+              fontFamily: "var(--font-serif)",
+              fontSize: 46,
               fontWeight: 400,
-              color: "#0F0F0E",
-              lineHeight: 1.2,
-              marginBottom: 6,
-              letterSpacing: "-0.02em",
+              lineHeight: 1,
+              marginBottom: 12,
+              letterSpacing: "-0.022em",
             }}
           >
             Your web
           </h1>
-          <p style={{ fontSize: 14, color: "#8C8C85" }}>
-            Who you know, who&apos;s in each club, and the shortest path into
-            your top target.
+          <p style={{ fontSize: 14, color: "var(--ink-50)" }}>
+            Who you know (from LinkedIn connections we could import), who&apos;s in
+            each club, and the best path into your top target. Alumni are labeled.
           </p>
         </div>
 
         {target && path && (
           <div
             style={{
-              background: "#EBEBFF",
-              border: "1px solid #C7C7FF",
-              borderRadius: 14,
-              padding: "14px 18px",
+              background: "var(--navy)",
+              color: "#fff",
+              borderRadius: 16,
+              padding: "18px 22px",
               marginBottom: 20,
               display: "flex",
               flexWrap: "wrap",
@@ -166,15 +163,25 @@ export default function NetworkPage() {
               maxWidth: 900,
             }}
           >
-            <span style={{ color: "#8C8C85" }}>Your move:</span>
-            <span style={{ fontWeight: 600, color: "#3B3BFF" }}>
-              Reach out to {path.name}
-            </span>
-            <span style={{ color: "#4A4A44" }}>
+            <span style={{ color: "rgba(255,255,255,.55)" }}>Your move:</span>
+            <span style={{ fontWeight: 600 }}>Reach out to {path.name}</span>
+            <span style={{ color: "rgba(255,255,255,.7)" }}>
               ({path.role}
-              {path.is_alumni ? ", alum" : ""}) — your strongest path into
+              {path.is_alumni ? ", alum" : ""}) —{" "}
+              {path.is_alumni ? "alumni fallback path into" : "your strongest current path into"}
             </span>
-            <span style={{ fontWeight: 600, color: "#0F0F0E" }}>{target.name}</span>
+            <span style={{ fontWeight: 600 }}>{target.name}</span>
+          </div>
+        )}
+
+        {!loading && connections.length === 0 && (
+          <div className="rl-gap" style={{ marginBottom: 20, maxWidth: 900 }}>
+            <strong style={{ display: "block", color: "var(--ink)", marginBottom: 6 }}>
+              An honest gap
+            </strong>
+            No 1st-degree LinkedIn connections imported yet (LinkedIn usually
+            authwalls that). Edges to people only appear when we have real
+            connection slugs — we don&apos;t fake them.
           </div>
         )}
 
@@ -188,16 +195,14 @@ export default function NetworkPage() {
         <div style={{ maxWidth: 1100 }}>
           {loading ? (
             <div
+              className="rl-card"
               style={{
                 height: 600,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                borderRadius: 20,
-                border: "1px solid #E8E8E3",
-                background: "#FFFFFF",
                 fontSize: 14,
-                color: "#8C8C85",
+                color: "var(--ink-50)",
               }}
             >
               Building your graph…
@@ -207,23 +212,23 @@ export default function NetworkPage() {
           )}
         </div>
       </main>
-    </div>
+    </AppShell>
   );
 }
 
 function Legend({ color, label }: { color: string; label: string }) {
   return (
-    <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--ink-50)" }}>
       <span
         style={{
-          display: "inline-block",
           width: 10,
           height: 10,
           borderRadius: "50%",
           background: color,
+          display: "inline-block",
         }}
       />
-      <span style={{ fontSize: 12, color: "#8C8C85" }}>{label}</span>
-    </span>
+      {label}
+    </div>
   );
 }

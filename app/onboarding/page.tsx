@@ -2,10 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { Wordmark } from "@/components/Wordmark";
 import { getSupabase } from "@/lib/supabase";
 import type { CareerGoal } from "@/lib/types";
-import { useSchool } from "@/components/SchoolProvider";
-import { DEFAULT_SCHOOL, SCHOOLS, type School } from "@/lib/school";
 
 const GOALS: { id: CareerGoal; label: string; icon: string; desc: string }[] = [
   { id: "consulting", label: "Consulting", icon: "💼", desc: "MBB, T2 strategy" },
@@ -19,47 +18,62 @@ const CLUB_TYPES = ["consulting", "finance", "tech", "vc", "design"];
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
-  padding: "12px 16px",
-  borderRadius: 10,
-  border: "1.5px solid #E8E8E3",
-  fontSize: 14,
+  padding: "14px 15px",
+  borderRadius: 11,
+  border: "1px solid var(--border-strong)",
+  fontSize: 14.5,
   outline: "none",
-  background: "#FAFAF7",
-  color: "#0F0F0E",
-  fontFamily: "'Inter', sans-serif",
+  background: "var(--bg-sunken)",
+  color: "var(--ink)",
 };
 
 const labelStyle: React.CSSProperties = {
   display: "block",
-  fontSize: 11,
+  fontSize: 12.5,
   fontWeight: 700,
-  color: "#8C8C85",
-  textTransform: "uppercase",
+  color: "var(--ink-45)",
   letterSpacing: "0.08em",
+  textTransform: "uppercase",
   marginBottom: 8,
 };
 
 export default function OnboardingPage() {
   const router = useRouter();
-  const { school: selectedSchool, setSchool: setSelectedSchool } = useSchool();
   const [fullName, setFullName] = useState("");
-  const [school, setSchool] = useState<string>(DEFAULT_SCHOOL);
+  const [school, setSchool] = useState("Cornell");
   const [goal, setGoal] = useState<CareerGoal>("consulting");
   const [linkedin, setLinkedin] = useState("");
   const [targets, setTargets] = useState<string[]>(["consulting"]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [loadingProfile, setLoadingProfile] = useState(true);
 
   useEffect(() => {
-    setSchool(selectedSchool);
-  }, [selectedSchool]);
-
-  useEffect(() => {
-    getSupabase()
-      .auth.getUser()
-      .then(({ data }) => {
-        if (!data.user) router.push("/login");
-      });
+    const sb = getSupabase();
+    (async () => {
+      const { data } = await sb.auth.getUser();
+      if (!data.user) {
+        router.push("/login");
+        return;
+      }
+      const { data: prof } = await sb
+        .from("profiles")
+        .select("*")
+        .eq("id", data.user.id)
+        .maybeSingle();
+      if (prof) {
+        setEditing(true);
+        setFullName(prof.full_name ?? "");
+        setSchool(prof.school ?? "Cornell");
+        if (prof.career_goal) setGoal(prof.career_goal as CareerGoal);
+        setLinkedin(prof.linkedin_url ?? "");
+        if (Array.isArray(prof.target_clubs) && prof.target_clubs.length) {
+          setTargets(prof.target_clubs);
+        }
+      }
+      setLoadingProfile(false);
+    })();
   }, [router]);
 
   function toggleTarget(t: string) {
@@ -85,15 +99,34 @@ export default function OnboardingPage() {
       career_goal: goal,
       linkedin_url: linkedin,
       target_clubs: targets,
+      // Force re-import path on clubs if needed
+      linkedin_scraped_at: null,
     });
     if (error) {
       setError(error.message);
       setSaving(false);
       return;
     }
-    if (school === "Cornell" || school === "UC Berkeley") {
-      setSelectedSchool(school);
+
+    if (linkedin.trim()) {
+      const { data: sessionData } = await sb.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (token) {
+        try {
+          await fetch("/api/linkedin/import", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ linkedinUrl: linkedin.trim(), school }),
+          });
+        } catch {
+          // Non-blocking — ranking still works with category + whatever we have
+        }
+      }
     }
+
     router.push("/clubs");
   }
 
@@ -101,52 +134,46 @@ export default function OnboardingPage() {
     <main
       style={{
         minHeight: "100vh",
-        background: "#FAFAF7",
+        background: "var(--bg-page)",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
         padding: "60px 20px 80px",
       }}
     >
-      {/* Logo top-left */}
-      <div style={{ position: "fixed", top: 24, left: 32, display: "flex", alignItems: "center", gap: 8 }}>
-        <div style={{ width: 26, height: 26, background: "#3B3BFF", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="white" />
-          </svg>
-        </div>
-        <span style={{ fontWeight: 700, fontSize: 15, color: "#0F0F0E", letterSpacing: "-0.02em" }}>
-          rushline
-        </span>
+      <div style={{ position: "fixed", top: 24, left: 32 }}>
+        <Wordmark href="/clubs" />
       </div>
 
       <div
+        className="rl-card"
         style={{
           width: "100%",
           maxWidth: 560,
-          background: "#FFFFFF",
-          borderRadius: 20,
-          border: "1px solid #E8E8E3",
-          boxShadow: "0 4px 24px rgba(0,0,0,0.06)",
+          borderRadius: 18,
+          boxShadow: "var(--shadow-elevated)",
           padding: "40px 44px 36px",
           marginTop: 40,
         }}
       >
         <h1
           style={{
-            fontFamily: "'Newsreader', serif",
-            fontSize: 30,
+            fontFamily: "var(--font-serif)",
+            fontSize: 40,
             fontWeight: 400,
-            color: "#0F0F0E",
             marginBottom: 6,
-            lineHeight: 1.2,
+            lineHeight: 1,
+            letterSpacing: "-0.022em",
           }}
         >
-          Tell us who you are.
+          {editing ? "Update your profile." : "Tell us who you are."}
         </h1>
-        <p style={{ fontSize: 14, color: "#8C8C85", marginBottom: 32, lineHeight: 1.5 }}>
-          rushline uses this to rank clubs and personalize your intel. No long
-          quiz — drop your LinkedIn and we build the picture.
+        <p style={{ fontSize: 14.5, color: "var(--ink-50)", marginBottom: 32, lineHeight: 1.5 }}>
+          {loadingProfile
+            ? "Loading your profile…"
+            : editing
+              ? "Change goals, school, or LinkedIn anytime — matches update when you save."
+              : "rushline uses this to rank clubs and personalize your intel. No long quiz — drop your LinkedIn and we build the picture."}
         </p>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 26 }}>
@@ -158,36 +185,19 @@ export default function OnboardingPage() {
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 placeholder="Alex Rivera"
-                onFocus={(e) => (e.target.style.borderColor = "#3B3BFF")}
-                onBlur={(e) => (e.target.style.borderColor = "#E8E8E3")}
+                onFocus={(e) => (e.target.style.borderColor = "var(--accent)")}
+                onBlur={(e) => (e.target.style.borderColor = "var(--border-strong)")}
               />
             </div>
             <div>
               <label style={labelStyle}>School</label>
-              <select
-                style={{
-                  ...inputStyle,
-                  cursor: "pointer",
-                  // Native chevrons sit flush to the edge; draw our own inset arrow.
-                  appearance: "none",
-                  WebkitAppearance: "none",
-                  MozAppearance: "none",
-                  paddingRight: 40,
-                  backgroundImage:
-                    "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M2.5 4.5L6 8L9.5 4.5' stroke='%238C8C85' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\")",
-                  backgroundRepeat: "no-repeat",
-                  backgroundPosition: "right 14px center",
-                  backgroundSize: "12px",
-                }}
+              <input
+                style={inputStyle}
                 value={school}
-                onChange={(e) => setSchool(e.target.value as School)}
-              >
-                {SCHOOLS.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
+                onChange={(e) => setSchool(e.target.value)}
+                onFocus={(e) => (e.target.style.borderColor = "var(--accent)")}
+                onBlur={(e) => (e.target.style.borderColor = "var(--border-strong)")}
+              />
             </div>
           </div>
 
@@ -203,19 +213,18 @@ export default function OnboardingPage() {
                     style={{
                       padding: "12px 14px",
                       borderRadius: 12,
-                      border: `1.5px solid ${selected ? "#3B3BFF" : "#E8E8E3"}`,
-                      background: selected ? "#EBEBFF" : "#FFFFFF",
+                      border: `1px solid ${selected ? "var(--accent)" : "var(--border-strong)"}`,
+                      background: selected ? "var(--accent-tint)" : "#FFFFFF",
                       cursor: "pointer",
                       textAlign: "left",
                       transition: "all 0.15s",
-                      fontFamily: "'Inter', sans-serif",
                     }}
                   >
                     <div style={{ fontSize: 18, marginBottom: 3 }}>{g.icon}</div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: selected ? "#3B3BFF" : "#0F0F0E", lineHeight: 1.3 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: selected ? "var(--accent)" : "var(--ink)", lineHeight: 1.3 }}>
                       {g.label}
                     </div>
-                    <div style={{ fontSize: 11, color: "#8C8C85", marginTop: 2 }}>{g.desc}</div>
+                    <div style={{ fontSize: 11, color: "var(--ink-45)", marginTop: 2 }}>{g.desc}</div>
                   </button>
                 );
               })}
@@ -234,15 +243,14 @@ export default function OnboardingPage() {
                     style={{
                       padding: "9px 18px",
                       borderRadius: 999,
-                      border: `1.5px solid ${selected ? "#3B3BFF" : "#E8E8E3"}`,
-                      background: selected ? "#3B3BFF" : "#FFFFFF",
-                      color: selected ? "#FFFFFF" : "#4A4A44",
+                      border: `1px solid ${selected ? "var(--accent)" : "var(--border-strong)"}`,
+                      background: selected ? "var(--accent)" : "#FFFFFF",
+                      color: selected ? "#FFFFFF" : "rgba(0,0,0,.6)",
                       fontSize: 13,
                       fontWeight: 500,
                       cursor: "pointer",
                       transition: "all 0.15s",
                       textTransform: "capitalize",
-                      fontFamily: "'Inter', sans-serif",
                     }}
                   >
                     {t}
@@ -259,33 +267,30 @@ export default function OnboardingPage() {
               value={linkedin}
               onChange={(e) => setLinkedin(e.target.value)}
               placeholder="https://linkedin.com/in/you"
-              onFocus={(e) => (e.target.style.borderColor = "#3B3BFF")}
-              onBlur={(e) => (e.target.style.borderColor = "#E8E8E3")}
+              onFocus={(e) => (e.target.style.borderColor = "var(--accent)")}
+              onBlur={(e) => (e.target.style.borderColor = "var(--border-strong)")}
             />
-            <p style={{ fontSize: 11, color: "#B0B0A8", marginTop: 6 }}>
-              We read public data only.
+            <p style={{ fontSize: 11, color: "var(--ink-42)", marginTop: 6 }}>
+              We scrape public profile signals to personalize match scores. LinkedIn
+              often blocks connection lists — we never invent them.
             </p>
           </div>
 
-          {error && <p style={{ fontSize: 13, color: "#DC2626" }}>{error}</p>}
+          {error && <p style={{ fontSize: 13, color: "var(--warn-text)" }}>{error}</p>}
 
           <button
             onClick={save}
             disabled={saving}
+            className="rl-btn rl-btn-accent"
             style={{
-              padding: "13px 0",
-              borderRadius: 10,
-              background: saving ? "#C7C7FF" : "#3B3BFF",
-              color: "#FFFFFF",
-              border: "none",
-              fontSize: 14,
-              fontWeight: 600,
+              padding: "14px 0",
+              borderRadius: 12,
+              fontSize: 15,
               cursor: saving ? "wait" : "pointer",
-              fontFamily: "'Inter', sans-serif",
-              letterSpacing: "-0.01em",
+              width: "100%",
             }}
           >
-            {saving ? "Saving…" : "Build my feed →"}
+            {saving ? "Saving…" : editing ? "Save & refresh matches →" : "Build my feed →"}
           </button>
         </div>
       </div>

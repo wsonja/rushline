@@ -109,26 +109,25 @@ export default function CoffeeChatDrawer({
           width: "min(480px, 100vw)",
           height: "100vh",
           background: "#FFFFFF",
-          borderLeft: "1px solid #E8E8E3",
+          borderLeft: "1px solid var(--border)",
           boxShadow: "-8px 0 40px rgba(0,0,0,0.12)",
           zIndex: 50,
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
-          fontFamily: "'Inter', sans-serif",
         }}
       >
         {/* Header */}
         <div
           style={{
             padding: "20px 24px",
-            borderBottom: "1px solid #E8E8E3",
+            borderBottom: "1px solid var(--border)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
           }}
         >
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#0F0F0E", letterSpacing: "-0.01em" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)", letterSpacing: "-0.01em" }}>
             Coffee Chat Draft
           </div>
           <button
@@ -137,7 +136,7 @@ export default function CoffeeChatDrawer({
               background: "none",
               border: "none",
               cursor: "pointer",
-              color: "#8C8C85",
+              color: "var(--ink-45)",
               fontSize: 18,
               lineHeight: 1,
               padding: "4px 6px",
@@ -162,8 +161,8 @@ export default function CoffeeChatDrawer({
           {/* Member mini-profile */}
           <div
             style={{
-              background: "#FAFAF7",
-              border: "1px solid #E8E8E3",
+              background: "var(--bg-page)",
+              border: "1px solid var(--border)",
               borderRadius: 14,
               padding: "16px 18px",
               display: "flex",
@@ -189,10 +188,10 @@ export default function CoffeeChatDrawer({
               {initials(member.name)}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: "#0F0F0E", marginBottom: 2 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "var(--ink)", marginBottom: 2 }}>
                 {member.name}
               </div>
-              <div style={{ fontSize: 12, color: "#8C8C85", marginBottom: 8 }}>
+              <div style={{ fontSize: 12, color: "var(--ink-45)", marginBottom: 8 }}>
                 {member.role} · {club.name}
               </div>
               <div style={{ display: "flex", gap: 8 }}>
@@ -255,7 +254,7 @@ export default function CoffeeChatDrawer({
                 style={{
                   fontSize: 11,
                   fontWeight: 700,
-                  color: "#8C8C85",
+                  color: "var(--ink-45)",
                   textTransform: "uppercase",
                   letterSpacing: "0.08em",
                 }}
@@ -276,10 +275,9 @@ export default function CoffeeChatDrawer({
                         fontWeight: 600,
                         cursor: "pointer",
                         background: tone === t ? "#FFFFFF" : "transparent",
-                        color: tone === t ? "#0F0F0E" : "#8C8C85",
+                        color: tone === t ? "var(--ink)" : "var(--ink-45)",
                         boxShadow: tone === t ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
                         transition: "all 0.15s",
-                        fontFamily: "'Inter', sans-serif",
                         textTransform: "capitalize",
                       }}
                     >
@@ -295,13 +293,13 @@ export default function CoffeeChatDrawer({
                     width: 28,
                     height: 28,
                     borderRadius: 7,
-                    border: "1.5px solid #E8E8E3",
-                    background: loading ? "#EBEBFF" : "#FFFFFF",
+                    border: "1.5px solid var(--border)",
+                    background: loading ? "var(--accent-tint)" : "#FFFFFF",
                     cursor: loading ? "wait" : "pointer",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    color: "#3B3BFF",
+                    color: "var(--accent)",
                     padding: 0,
                   }}
                 >
@@ -327,8 +325,8 @@ export default function CoffeeChatDrawer({
 
             <div
               style={{
-                background: "#FAFAF7",
-                border: "1px solid #E8E8E3",
+                background: "var(--bg-page)",
+                border: "1px solid var(--border)",
                 borderRadius: 12,
                 overflow: "hidden",
               }}
@@ -336,13 +334,13 @@ export default function CoffeeChatDrawer({
               <div
                 style={{
                   padding: "10px 14px",
-                  borderBottom: "1px solid #E8E8E3",
+                  borderBottom: "1px solid var(--border)",
                   display: "flex",
                   gap: 8,
                   alignItems: "center",
                 }}
               >
-                <span style={{ fontSize: 11, color: "#8C8C85", fontWeight: 600, flexShrink: 0 }}>
+                <span style={{ fontSize: 11, color: "var(--ink-45)", fontWeight: 600, flexShrink: 0 }}>
                   Subject
                 </span>
                 <input
@@ -351,12 +349,11 @@ export default function CoffeeChatDrawer({
                   style={{
                     flex: 1,
                     fontSize: 12,
-                    color: "#0F0F0E",
+                    color: "var(--ink)",
                     fontWeight: 500,
                     background: "transparent",
                     border: "none",
                     outline: "none",
-                    fontFamily: "'Inter', sans-serif",
                   }}
                 />
               </div>
@@ -374,7 +371,6 @@ export default function CoffeeChatDrawer({
                   border: "none",
                   outline: "none",
                   resize: "vertical",
-                  fontFamily: "'Inter', sans-serif",
                 }}
               />
             </div>
@@ -387,7 +383,7 @@ export default function CoffeeChatDrawer({
                 style={{
                   fontSize: 11,
                   fontWeight: 700,
-                  color: "#8C8C85",
+                  color: "var(--ink-45)",
                   textTransform: "uppercase",
                   letterSpacing: "0.08em",
                   marginBottom: 10,
@@ -404,15 +400,14 @@ export default function CoffeeChatDrawer({
                       display: "flex",
                       alignItems: "flex-start",
                       gap: 10,
-                      background: checked[i] ? "#F0FFF4" : "#FAFAF7",
-                      border: `1px solid ${checked[i] ? "#A3E8B0" : "#E8E8E3"}`,
+                      background: checked[i] ? "#F0FFF4" : "var(--bg-page)",
+                      border: `1px solid ${checked[i] ? "#A3E8B0" : "var(--border)"}`,
                       borderRadius: 10,
                       padding: "12px 14px",
                       cursor: "pointer",
                       textAlign: "left",
                       transition: "all 0.15s",
                       width: "100%",
-                      fontFamily: "'Inter', sans-serif",
                     }}
                   >
                     <span
@@ -456,7 +451,7 @@ export default function CoffeeChatDrawer({
         <div
           style={{
             padding: "16px 24px",
-            borderTop: "1px solid #E8E8E3",
+            borderTop: "1px solid var(--border)",
             background: "#FFFFFF",
             display: "flex",
             gap: 8,
@@ -472,7 +467,7 @@ export default function CoffeeChatDrawer({
               justifyContent: "center",
               padding: 10,
               borderRadius: 10,
-              background: "#3B3BFF",
+              background: "var(--accent)",
               color: "#FFFFFF",
               fontSize: 13,
               fontWeight: 600,
@@ -495,7 +490,7 @@ export default function CoffeeChatDrawer({
               borderRadius: 10,
               background: "#FFFFFF",
               color: "#4A4A44",
-              border: "1.5px solid #E8E8E3",
+              border: "1.5px solid var(--border)",
               fontSize: 13,
               fontWeight: 500,
               textDecoration: "none",
@@ -520,11 +515,10 @@ export default function CoffeeChatDrawer({
               borderRadius: 10,
               background: copied ? "#F0FFF4" : "#FFFFFF",
               color: copied ? "#166534" : "#4A4A44",
-              border: `1.5px solid ${copied ? "#A3E8B0" : "#E8E8E3"}`,
+              border: `1.5px solid ${copied ? "#A3E8B0" : "var(--border)"}`,
               fontSize: 13,
               fontWeight: 500,
               cursor: "pointer",
-              fontFamily: "'Inter', sans-serif",
               transition: "all 0.15s",
             }}
           >

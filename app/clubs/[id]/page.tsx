@@ -2,48 +2,28 @@
 
 import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import Sidebar from "@/components/Sidebar";
+import { AppShell } from "@/components/AppShell";
+import { ScoreBar } from "@/components/Controls";
 import CoffeeChatDrawer from "@/components/CoffeeChatDrawer";
+import { citeReview, confidenceLabel } from "@/lib/evidence";
 import { getSupabase } from "@/lib/supabase";
 import { scoreClubDetailed } from "@/lib/rank";
-import { clubPrestige, firmPrestigePoints } from "@/lib/prestige";
-import {
-  rankPeopleToMeet,
-  sortMembersForMeet,
-} from "@/lib/people-to-meet";
+import { rankPeopleToMeet, sortMembersForMeet } from "@/lib/people-to-meet";
 import {
   colorFor,
-  formatApproxHeadcount,
   initials,
   monogram,
+  relativeTime,
   softenHeadcountPhrases,
 } from "@/lib/ui";
 import type {
   Club,
   ClubIntel,
   Member,
-  PlacementFirm,
   Profile,
   RedditPost,
   UserConnection,
 } from "@/lib/types";
-import { useSchool } from "@/components/SchoolProvider";
-import { schoolMatches, schoolShortLabel } from "@/lib/school";
-import {
-  isCornellProjectTeam,
-  projectTeamTracks,
-  scrubDatesToTbd,
-  splitProcessStep,
-  type TimelineStep,
-  type TimelineTrack,
-} from "@/lib/recruitment-timeline";
-
-type PlacementChip = {
-  firm: string;
-  kinds: string[];
-  source?: string;
-  count: number;
-};
 
 function linkedinConnect(m: Member, club: Club) {
   if (m.linkedin_url) return m.linkedin_url;
@@ -53,84 +33,39 @@ function linkedinConnect(m: Member, club: Club) {
 }
 function instagramLink(m: Member) {
   if (!m.instagram) return null;
-  const handle = m.instagram.replace(/^@/, "");
-  return `https://www.instagram.com/${handle}`;
+  return `https://www.instagram.com/${m.instagram.replace(/^@/, "")}`;
 }
 
-function SectionCard({
-  title,
+function escapeHtml(s: string) {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function Card({
+  id,
   children,
-  accent,
-  badge,
-  full,
+  style,
 }: {
-  title: string;
+  id?: string;
   children: React.ReactNode;
-  accent?: boolean;
-  badge?: React.ReactNode;
-  full?: boolean;
+  style?: React.CSSProperties;
 }) {
   return (
-    <div
-      style={{
-        background: accent ? "#EBEBFF" : "#FFFFFF",
-        border: `1px solid ${accent ? "#C7C7FF" : "#E8E8E3"}`,
-        borderRadius: 16,
-        padding: "22px 24px",
-        gridColumn: full ? "1 / -1" : undefined,
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 14,
-        }}
-      >
-        <div
-          style={{
-            fontSize: 11,
-            fontWeight: 700,
-            color: "#8C8C85",
-            textTransform: "uppercase",
-            letterSpacing: "0.08em",
-          }}
-        >
-          {title}
-        </div>
-        {badge}
-      </div>
+    <div id={id} className="rl-card" style={{ padding: 28, borderRadius: 16, ...style }}>
       {children}
     </div>
   );
 }
 
-function SourceChip({ label, url }: { label: string; url: string }) {
-  return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noreferrer"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-        background: "#F4F4F0",
-        border: "1px solid #E8E8E3",
-        borderRadius: 6,
-        padding: "1px 7px",
-        fontSize: 11,
-        color: "#4A4A44",
-        fontWeight: 500,
-        textDecoration: "none",
-      }}
-    >
-      <span style={{ width: 10, height: 10, borderRadius: 2, background: "#3B3BFF", opacity: 0.7 }} />
-      {label}
-    </a>
-  );
-}
+const JUMP = [
+  { id: "review", label: "The review" },
+  { id: "sentiment", label: "Sentiment" },
+  { id: "placements", label: "Placements" },
+  { id: "roster", label: "Roster" },
+  { id: "path", label: "Your path in" },
+];
 
 export default function ClubDetail({
   params,
@@ -138,206 +73,168 @@ export default function ClubDetail({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const { school, ready } = useSchool();
   const [club, setClub] = useState<Club | null>(null);
   const [intel, setIntel] = useState<ClubIntel | null>(null);
+  const [intelUpdated, setIntelUpdated] = useState<string | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [reddit, setReddit] = useState<RedditPost[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [connections, setConnections] = useState<UserConnection[]>([]);
   const [active, setActive] = useState<Member | null>(null);
   const [loading, setLoading] = useState(true);
-  const [wrongSchool, setWrongSchool] = useState(false);
-  const [recruitTrack, setRecruitTrack] = useState<string>("first-year");
-  const [placementsExpanded, setPlacementsExpanded] = useState(false);
+  const [tracked, setTracked] = useState(false);
+  const [activeJump, setActiveJump] = useState("review");
+  const [hoverSrc, setHoverSrc] = useState<number | null>(null);
 
   useEffect(() => {
-    if (!ready) return;
     const sb = getSupabase();
     (async () => {
-      setLoading(true);
-      setWrongSchool(false);
-      const [{ data: c }, { data: it }, { data: mem }, { data: rp }] =
-        await Promise.all([
-          sb.from("clubs").select("*").eq("id", id).maybeSingle(),
-          sb.from("club_intel").select("*").eq("club_id", id).maybeSingle(),
-          sb.from("members").select("*").eq("club_id", id),
-          sb.from("reddit_posts").select("*").eq("club_id", id),
-        ]);
-      const clubRow = c as Club | null;
-      if (clubRow && !schoolMatches(clubRow.school, school)) {
-        setClub(null);
-        setIntel(null);
-        setMembers([]);
-        setReddit([]);
-        setWrongSchool(true);
-      } else {
-        setClub(clubRow);
-        setIntel(it as ClubIntel | null);
-        setMembers((mem as Member[]) ?? []);
-        setReddit((rp as RedditPost[]) ?? []);
-      }
+      const [{ data: c }, { data: it }, { data: mem }, { data: rp }] = await Promise.all([
+        sb.from("clubs").select("*").eq("id", id).maybeSingle(),
+        sb.from("club_intel").select("*").eq("club_id", id).maybeSingle(),
+        sb.from("members").select("*").eq("club_id", id),
+        sb.from("reddit_posts").select("*").eq("club_id", id),
+      ]);
+      setClub(c as Club | null);
+      setIntel(it as ClubIntel | null);
+      setIntelUpdated((it as { updated_at?: string } | null)?.updated_at ?? null);
+      setMembers((mem as Member[]) ?? []);
+      setReddit((rp as RedditPost[]) ?? []);
       const { data: userData } = await sb.auth.getUser();
       if (userData.user) {
         const [{ data: prof }, connRes] = await Promise.all([
           sb.from("profiles").select("*").eq("id", userData.user.id).maybeSingle(),
-          sb
-            .from("user_connections")
-            .select("*")
-            .eq("user_id", userData.user.id),
+          sb.from("user_connections").select("*").eq("user_id", userData.user.id),
         ]);
-        setConnections(
-          connRes.error ? [] : ((connRes.data as UserConnection[]) ?? [])
-        );
         setProfile(prof as Profile | null);
+        setConnections(connRes.error ? [] : ((connRes.data as UserConnection[]) ?? []));
       }
       setLoading(false);
     })();
-  }, [id, school, ready]);
+  }, [id]);
 
-  // Hooks must run before any early return (previous crash was useMemo after loading gate).
-  const placementChips = useMemo(() => {
-    const byFirm = new Map<string, PlacementChip>();
-    for (const p of (intel?.placements ?? []) as PlacementFirm[]) {
-      const firm = (p.firm ?? "").trim();
-      if (!firm) continue;
-      // Skip school / org noise
-      if (/cornell|bowers|college of/i.test(firm)) continue;
-      const key = firm.toLowerCase();
-      const existing = byFirm.get(key);
-      const kinds = p.kinds ?? [];
-      const add = Math.max(1, p.count ?? 1);
-      if (existing) {
-        existing.count += add;
-        for (const k of kinds) {
-          if (!existing.kinds.includes(k)) existing.kinds.push(k);
-        }
-        if (!existing.source && p.source) existing.source = p.source;
-      } else {
-        byFirm.set(key, {
-          firm,
-          kinds: [...kinds],
-          source: p.source,
-          count: add,
-        });
-      }
-    }
-    if (byFirm.size < 6 && club) {
-      try {
-        const prestige = clubPrestige(
-          members,
-          profile?.career_goal ?? null,
-          profile?.target_clubs ?? [],
-          intel?.placements ?? [],
-          club
-        );
-        for (const hit of prestige.hits) {
-          const key = hit.firm.toLowerCase();
-          if (!byFirm.has(key)) {
-            byFirm.set(key, {
-              firm: hit.firm,
-              kinds: [],
-              source: undefined,
-              count: 1,
-            });
-          } else {
-            // prestige hit reinforces but don't double-count if already have a count
-          }
-        }
-      } catch {
-        /* prestige is best-effort */
-      }
-    }
-    // Full list kept for expand — UI shows top 10 until expanded.
-    return [...byFirm.values()].sort(
-      (a, b) =>
-        firmPrestigePoints(b.firm) - firmPrestigePoints(a.firm) ||
-        b.count - a.count ||
-        a.firm.localeCompare(b.firm)
+  useEffect(() => {
+    setTracked(localStorage.getItem(`rushline.track.${id}`) === "1");
+  }, [id]);
+
+  const peopleToMeet = rankPeopleToMeet(members, connections, profile);
+  const rosterSorted = sortMembersForMeet(members, connections, profile);
+  const match = club
+    ? scoreClubDetailed(club, {
+        profile,
+        connections,
+        members,
+        placementsByClubId: intel?.placements?.length
+          ? { [club.id]: intel.placements }
+          : undefined,
+      }).score
+    : 0;
+
+  const sources = intel?.sources ?? [];
+  const cited = useMemo(() => {
+    if (!intel?.review) return null;
+    const text = escapeHtml(softenHeadcountPhrases(intel.review));
+    if (!sources.length) return { html: text, used: [] as number[] };
+    return citeReview(text, sources.length);
+  }, [intel?.review, sources.length]);
+
+  const deadlineHint = useMemo(() => {
+    const blob = [
+      intel?.x_sentiment?.summary,
+      ...(intel?.x_sentiment?.posts ?? []).map((p) => p.text),
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const m = blob.match(
+      /(close|closes|deadline|due|applications?)[^\n.]{0,40}(\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}|\b\d{1,2}\/\d{1,2})/i
     );
-  }, [intel?.placements, members, profile, club]);
+    return m ? m[0] : null;
+  }, [intel]);
 
-  const visiblePlacementChips = placementsExpanded
-    ? placementChips
-    : placementChips.slice(0, 10);
-  const hiddenPlacementCount = Math.max(0, placementChips.length - 10);
+  const path = useMemo(() => {
+    const you = {
+      name: profile?.full_name || "You",
+      role: "You",
+      initials: initials(profile?.full_name || "You"),
+    };
+    const connected = members.filter((m) => {
+      const slug = (m.linkedin_url || "").toLowerCase();
+      return connections.some(
+        (c) => slug.includes(c.connected_linkedin_slug.toLowerCase()) && c.degree === 1
+      );
+    });
+    const hop = connected[0] ?? peopleToMeet[0] ?? members.find((m) => !m.is_alumni) ?? members[0];
+    if (!hop) return { you, hops: [] as Member[], label: null as string | null };
+    const hops = connected[0] ? [connected[0]] : peopleToMeet.slice(0, 2);
+    const unique = hops.filter((h, i, a) => a.findIndex((x) => x.id === h.id) === i).slice(0, 2);
+    return {
+      you,
+      hops: unique,
+      label: connected[0] ? "1 hop · first-degree" : unique.length ? `${unique.length} hop${unique.length > 1 ? "s" : ""} · strongest route we can show` : null,
+    };
+  }, [profile, members, connections, peopleToMeet]);
 
-  const isProjectTeam = isCornellProjectTeam(club);
+  const pageContext = club
+    ? [
+        `Club: ${club.name}`,
+        `Match: ${match}`,
+        club.tagline,
+        intel?.review,
+        `Sources: ${sources.map((s, i) => `${i + 1}. ${s.label}`).join("; ")}`,
+        intel?.reddit_sentiment?.summary
+          ? `Reddit: ${intel.reddit_sentiment.summary}`
+          : "Reddit: no data",
+        intel?.x_sentiment?.summary ? `Chatter: ${intel.x_sentiment.summary}` : "",
+        `Roster: ${members.slice(0, 12).map((m) => `${m.name} (${m.role})`).join(", ")}`,
+      ]
+        .filter(Boolean)
+        .join("\n")
+    : undefined;
 
-  const recruitmentTracks = useMemo((): TimelineTrack[] => {
-    if (isProjectTeam) return projectTeamTracks();
-
-    const process = intel?.interview?.process;
-    let steps: TimelineStep[] = [];
-    if (Array.isArray(process) && process.length > 0) {
-      // Non-project clubs: keep step labels, scrub unverified dates → TBD
-      steps = scrubDatesToTbd(process.map(splitProcessStep));
-    } else {
-      const legacy: TimelineStep[] = [];
-      if (intel?.interview?.rounds != null) {
-        legacy.push({
-          label: `${intel.interview.rounds} rounds`,
-          detail: `${intel.interview.rounds} interview rounds total.`,
-          when: "TBD",
-        });
-      }
-      if (intel?.interview?.technical_round !== undefined) {
-        legacy.push({
-          label: "Technical",
-          detail: intel.interview.technical_round
-            ? "Includes a technical component."
-            : "No technical round.",
-          when: "TBD",
-        });
-      }
-      if (intel?.interview?.case_format) {
-        legacy.push({
-          label: "Case format",
-          detail: intel.interview.case_format,
-          when: "TBD",
-        });
-      }
-      if (intel?.interview?.difficulty) {
-        legacy.push({
-          label: "Difficulty",
-          detail: intel.interview.difficulty,
-          when: "TBD",
-        });
-      }
-      steps = legacy;
-    }
-
-    if (!steps.length) return [];
-    return [
-      {
-        id: "club",
-        title: "Recruitment process",
-        subtitle: "Dates TBD until confirmed on the club site for FA26",
-        steps,
-      },
-    ];
-  }, [isProjectTeam, intel?.interview]);
-
-  const activeRecruitTrack =
-    recruitmentTracks.find((t) => t.id === recruitTrack) ?? recruitmentTracks[0] ?? null;
-  const timelineSteps = activeRecruitTrack?.steps ?? [];
+  const jumpNav = (
+    <>
+      <div className="rl-eyebrow" style={{ marginBottom: 11 }}>
+        On this page
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 13, color: "rgba(0,0,0,.55)" }}>
+        {JUMP.map((j) => (
+          <a
+            key={j.id}
+            href={`#${j.id}`}
+            onClick={() => setActiveJump(j.id)}
+            style={{
+              color: activeJump === j.id ? "var(--accent)" : "inherit",
+              fontWeight: activeJump === j.id ? 600 : 400,
+              textDecoration: "none",
+            }}
+          >
+            {j.label}
+          </a>
+        ))}
+      </div>
+    </>
+  );
 
   const shell = (content: React.ReactNode) => (
-    <div style={{ display: "flex", minHeight: "100vh", background: "#FAFAF7", position: "relative" }}>
-      <Sidebar />
-      <main
-        style={{
-          flex: 1,
-          height: "100vh",
-          overflowY: "auto",
-          padding: "40px 48px",
-          filter: active ? "blur(2px) brightness(0.9)" : "none",
-          transition: "filter 0.3s ease",
-          pointerEvents: active ? "none" : "auto",
-        }}
+    <div style={{ position: "relative" }}>
+      <AppShell
+        pageNav={jumpNav}
+        copilotDefaultOpen
+        copilotContext={pageContext}
+        copilotSuggestions={["Compare to CDS", "Who's most reachable?", "What's missing here?"]}
+        scrape={null}
       >
-        {content}
-      </main>
+        <main
+          style={{
+            height: "100vh",
+            overflowY: "auto",
+            filter: active ? "blur(2px) brightness(0.9)" : "none",
+            pointerEvents: active ? "none" : "auto",
+          }}
+        >
+          {content}
+        </main>
+      </AppShell>
       {active && club && (
         <CoffeeChatDrawer
           member={active}
@@ -349,189 +246,128 @@ export default function ClubDetail({
     </div>
   );
 
-  if (loading)
-    return shell(<div style={{ fontSize: 14, color: "#8C8C85" }}>Loading intel…</div>);
-
+  if (loading) return shell(<div style={{ padding: 34, color: "var(--ink-50)" }}>Loading intel…</div>);
   if (!club)
     return shell(
-      <div style={{ fontSize: 14, color: "#8C8C85" }}>
-        {wrongSchool
-          ? `This club isn’t in ${schoolShortLabel(school)}. Switch schools in the sidebar, or `
-          : "Club not found. "}
-        <Link href="/clubs" style={{ color: "#3B3BFF" }}>
-          Back to clubs
-        </Link>
+      <div style={{ padding: 34 }}>
+        Club not found. <Link href="/clubs">Back to clubs</Link>
       </div>
     );
 
-  const peopleToMeet = rankPeopleToMeet(members, connections, profile);
-  const rosterSorted = sortMembersForMeet(members, connections, profile);
-  const match = scoreClubDetailed(club, {
-    profile,
-    connections,
-    members,
-  }).score;
-
-  const vibeRows = [
-    intel?.vibe?.culture && {
-      label: "Culture",
-      val: softenHeadcountPhrases(intel.vibe.culture),
-    },
-    intel?.vibe?.selectivity && { label: "Selectivity", val: intel.vibe.selectivity },
-    intel?.vibe?.intensity && { label: "Intensity", val: intel.vibe.intensity },
-    intel?.vibe?.social_energy && { label: "Social energy", val: intel.vibe.social_energy },
-  ].filter(Boolean) as { label: string; val: string }[];
-
-  const positive = intel?.reddit_sentiment?.vibe === "positive";
-  const sentimentLabel =
-    intel?.reddit_sentiment?.vibe === "positive"
-      ? "Mostly Positive"
-      : intel?.reddit_sentiment?.vibe === "negative"
-      ? "Mostly Negative"
-      : "Mixed";
-
-  const hasReddit =
-    Boolean(intel?.reddit_sentiment?.summary) || reddit.length > 0;
-  const hasX =
-    Boolean(intel?.x_sentiment?.summary) ||
-    (intel?.x_sentiment?.posts?.length ?? 0) > 0;
-  const hasPlacements = placementChips.length > 0;
-  const showSocialRow = hasReddit || hasX || hasPlacements;
-  const hasRecruitment =
-    recruitmentTracks.length > 0 ||
-    Boolean(intel?.interview?.tips?.length) ||
-    Boolean(intel?.interview?.roles?.length) ||
-    Boolean(intel?.interview?.tracks_roles?.length) ||
-    Boolean(intel?.interview?.format_note) ||
-    Boolean(intel?.interview?.notes);
+  const redditEmpty = reddit.length === 0 && !intel?.reddit_sentiment?.summary;
+  const chatterQuote = intel?.x_sentiment?.posts?.[0];
+  const placements = intel?.placements ?? [];
 
   return shell(
-    <>
-      <Link
-        href="/clubs"
-        style={{
-          fontSize: 13,
-          color: "#8C8C85",
-          textDecoration: "none",
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 6,
-          marginBottom: 20,
-        }}
-      >
-        ← All clubs
-      </Link>
+    <div style={{ padding: "20px 34px 34px" }}>
+      <div style={{ fontSize: 13.5, color: "var(--ink-50)", marginBottom: 16 }}>
+        <Link href="/clubs" style={{ color: "inherit", textDecoration: "none" }}>
+          ← All clubs
+        </Link>
+        {club.category ? ` / ${club.category} / ${club.name}` : ` / ${club.name}`}
+      </div>
 
-      {/* Hero */}
-      <div
-        style={{
-          background: "#FFFFFF",
-          border: "1px solid #E8E8E3",
-          borderRadius: 20,
-          padding: "28px 32px",
-          marginBottom: 24,
-          maxWidth: 1100,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 20, marginBottom: 24 }}>
+      <Card>
+        <div style={{ display: "flex", gap: 20, alignItems: "flex-start" }}>
           <div
             style={{
-              width: 60,
-              height: 60,
+              width: 64,
+              height: 64,
               borderRadius: 14,
-              background: colorFor(club.name),
+              background: "var(--navy)",
+              color: "#fff",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              color: "white",
-              fontSize: 13,
+              fontSize: 17,
               fontWeight: 700,
-              letterSpacing: "0.04em",
-              flexShrink: 0,
+              flex: "none",
             }}
           >
-            {monogram(club.name)}
+            {monogram(club.name).slice(0, 2)}
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
               <h1
                 style={{
-                  fontFamily: "'Newsreader', serif",
-                  fontSize: 26,
+                  margin: 0,
+                  fontFamily: "var(--font-serif)",
                   fontWeight: 400,
-                  color: "#0F0F0E",
-                  lineHeight: 1.2,
-                  letterSpacing: "-0.02em",
+                  fontSize: 42,
+                  lineHeight: 1,
+                  letterSpacing: "-0.025em",
                 }}
               >
                 {club.name}
               </h1>
               <span
-                style={{
-                  background: "#EBEBFF",
-                  color: "#3B3BFF",
-                  borderRadius: 8,
-                  padding: "3px 10px",
-                  fontSize: 12,
-                  fontWeight: 600,
-                }}
+                className="rl-chip rl-chip-accent"
+                style={{ padding: "6px 12px", borderRadius: 9, fontSize: 14, fontWeight: 700 }}
               >
                 {match} match
               </span>
             </div>
             {club.tagline && (
-              <p style={{ fontSize: 13, color: "#8C8C85", marginBottom: 12 }}>{club.tagline}</p>
+              <p
+                style={{
+                  margin: "12px 0 0",
+                  fontSize: 15,
+                  lineHeight: 1.6,
+                  color: "var(--ink-70)",
+                  maxWidth: "70ch",
+                }}
+              >
+                {club.tagline}
+              </p>
             )}
-            <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
-              {[
-                { label: "Category", val: club.category ?? "—" },
-                { label: "School", val: club.school },
-                {
-                  label: "Roster",
-                  val: `${formatApproxHeadcount(members.length)} tracked`,
-                },
-                {
-                  label: "Sources",
-                  val: `${(intel?.sources?.length ?? 0) + reddit.length} scraped`,
-                },
-              ].map((stat) => (
-                <div key={stat.label}>
-                  <div
-                    style={{
-                      fontSize: 10,
-                      color: "#B0B0A8",
-                      fontWeight: 600,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.07em",
-                      marginBottom: 2,
-                    }}
-                  >
-                    {stat.label}
-                  </div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: "#0F0F0E", textTransform: "capitalize" }}>
-                    {stat.val}
-                  </div>
-                </div>
-              ))}
-            </div>
           </div>
         </div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, marginTop: 24 }}>
+          {[
+            { label: "Category", val: club.category ?? "—", warn: false },
+            { label: "Roster", val: `${members.length} tracked`, warn: false },
+            { label: "Sources", val: `${sources.length} scraped`, warn: false },
+            {
+              label: "Deadline",
+              val: deadlineHint ?? "Unknown",
+              warn: Boolean(deadlineHint),
+            },
+            {
+              label: "Confidence",
+              val: confidenceLabel(sources.length, members.length),
+              warn: false,
+            },
+          ].map((s) => (
+            <div
+              key={s.label}
+              style={{
+                background: s.warn ? "rgba(179,118,42,.09)" : "var(--bg-sunken)",
+                borderRadius: 11,
+                padding: "14px 16px",
+              }}
+            >
+              <div style={{ fontSize: 11.5, color: "var(--ink-45)" }}>{s.label}</div>
+              <div
+                style={{
+                  fontSize: 15,
+                  fontWeight: 700,
+                  marginTop: 6,
+                  color: s.warn ? "var(--warn-text)" : undefined,
+                  textTransform: s.label === "Category" ? "capitalize" : undefined,
+                }}
+              >
+                {s.val}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 10, marginTop: 20, flexWrap: "wrap" }}>
           {peopleToMeet[0] && (
             <button
+              type="button"
               onClick={() => setActive(peopleToMeet[0])}
-              style={{
-                padding: "10px 20px",
-                borderRadius: 10,
-                background: "#3B3BFF",
-                color: "#FFFFFF",
-                border: "none",
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: "pointer",
-                fontFamily: "'Inter', sans-serif",
-                letterSpacing: "-0.01em",
-              }}
+              className="rl-btn rl-btn-accent"
+              style={{ padding: "14px 24px", borderRadius: 11, fontSize: 14.5 }}
             >
               Draft coffee chat
             </button>
@@ -541,940 +377,433 @@ export default function ClubDetail({
               href={club.website}
               target="_blank"
               rel="noreferrer"
-              style={{
-                padding: "10px 20px",
-                borderRadius: 10,
-                background: "#FFFFFF",
-                color: "#4A4A44",
-                border: "1.5px solid #E8E8E3",
-                fontSize: 14,
-                fontWeight: 500,
-                textDecoration: "none",
-              }}
+              className="rl-btn rl-btn-ghost"
+              style={{ padding: "14px 24px", borderRadius: 11, fontSize: 14.5 }}
             >
               Website ↗
             </a>
           )}
+          <button
+            type="button"
+            className="rl-btn rl-btn-ghost"
+            style={{ padding: "14px 24px", borderRadius: 11, fontSize: 14.5 }}
+            onClick={() => {
+              const next = !tracked;
+              setTracked(next);
+              localStorage.setItem(`rushline.track.${id}`, next ? "1" : "0");
+            }}
+          >
+            {tracked ? "Deadline tracked" : "Track deadline"}
+          </button>
         </div>
-      </div>
+      </Card>
 
-      {/* Section grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, maxWidth: 1100 }}>
-        {intel?.review && (
-          <SectionCard title="The Review" full>
-            <p style={{ fontSize: 14, lineHeight: 1.7, color: "#2A2A24" }}>{intel.review}</p>
-            {intel.sources?.length > 0 && (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
-                {intel.sources.map((s, i) => (
-                  <SourceChip key={i} label={s.label} url={s.url} />
-                ))}
-              </div>
-            )}
-          </SectionCard>
+      <Card id="review" style={{ marginTop: 16 }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+          <div className="rl-eyebrow">The review</div>
+          <div style={{ fontSize: 12.5, color: "var(--ink-40)" }}>
+            Assembled from {sources.length || "the"} document{sources.length === 1 ? "" : "s"}
+            {intelUpdated ? ` · ${relativeTime(intelUpdated)}` : ""}
+          </div>
+        </div>
+        {cited ? (
+          <p
+            onMouseOver={(e) => {
+              const a = (e.target as HTMLElement).closest("a[href^='#src-']");
+              if (!a) return;
+              const n = Number((a as HTMLAnchorElement).hash.replace("#src-", ""));
+              setHoverSrc(n);
+            }}
+            onMouseOut={() => setHoverSrc(null)}
+            style={{
+              margin: "18px 0 0",
+              fontFamily: "var(--font-serif)",
+              fontSize: 19,
+              lineHeight: 1.65,
+              color: "#1a1a1a",
+              maxWidth: "78ch",
+              textWrap: "pretty",
+            }}
+            dangerouslySetInnerHTML={{ __html: cited.html }}
+          />
+        ) : (
+          <div className="rl-gap">
+            <strong style={{ display: "block", color: "var(--ink)", marginBottom: 6 }}>
+              An honest gap
+            </strong>
+            No cited review is on file for this club yet. We don&apos;t generate a blurb to fill the
+            space.
+          </div>
         )}
+        {sources.length > 0 && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 22 }}>
+            {sources.map((s, i) => (
+              <a
+                key={i}
+                id={`src-${i + 1}`}
+                href={s.url}
+                target="_blank"
+                rel="noreferrer"
+                className={hoverSrc === i + 1 ? "source-hit" : undefined}
+                style={{
+                  display: "flex",
+                  gap: 9,
+                  fontSize: 12.5,
+                  color: "var(--ink-55)",
+                  textDecoration: "none",
+                  padding: "4px 6px",
+                  margin: "0 -6px",
+                }}
+              >
+                <span style={{ color: "var(--accent)", fontWeight: 700 }}>{i + 1}</span>
+                {s.label}
+              </a>
+            ))}
+          </div>
+        )}
+      </Card>
 
-        {intel?.clients && intel.clients.length > 0 && (
-          <SectionCard title="Client History">
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {intel.clients.map((c) => (
-                <div key={c} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div id="sentiment" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
+        <Card>
+          <div className="rl-eyebrow">Reddit sentiment</div>
+          {redditEmpty ? (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 16 }}>
+                <ScoreBar value={34} warn />
+                <span style={{ fontSize: 13, fontWeight: 700, color: "var(--warn-text)" }}>No data</span>
+              </div>
+              <div className="rl-gap">
+                <strong style={{ display: "block", color: "var(--ink)", marginBottom: 6 }}>
+                  An honest gap
+                </strong>
+                This pass retrieved no usable subreddit threads
+                {intelUpdated ? ` (${relativeTime(intelUpdated)})` : ""}. An older note is superseded
+                by this gap rather than backfilled — we don&apos;t invent sentiment.
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 16 }}>
+                <ScoreBar
+                  value={
+                    intel?.reddit_sentiment?.vibe === "positive"
+                      ? 74
+                      : intel?.reddit_sentiment?.vibe === "negative"
+                        ? 32
+                        : 50
+                  }
+                  warn={intel?.reddit_sentiment?.vibe !== "positive"}
+                />
+                <span style={{ fontSize: 13, fontWeight: 700 }}>
+                  {intel?.reddit_sentiment?.vibe === "positive"
+                    ? "Mostly positive"
+                    : intel?.reddit_sentiment?.vibe === "negative"
+                      ? "Mostly negative"
+                      : "Mixed"}
+                </span>
+              </div>
+              {intel?.reddit_sentiment?.summary && (
+                <p style={{ margin: "14px 0 0", fontSize: 13.5, lineHeight: 1.6, color: "var(--ink-70)" }}>
+                  {intel.reddit_sentiment.summary}
+                </p>
+              )}
+            </>
+          )}
+        </Card>
+        <Card>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+            <span className="rl-eyebrow">Live chatter</span>
+            <span className="rl-chip">Proxied · LinkedIn + IG</span>
+          </div>
+          {intel?.x_sentiment?.summary || chatterQuote ? (
+            <>
+              {intel?.x_sentiment?.summary && (
+                <p style={{ margin: "16px 0 0", fontSize: 13.5, lineHeight: 1.6, color: "var(--ink-70)" }}>
+                  {intel.x_sentiment.summary}
+                </p>
+              )}
+              {chatterQuote && (
+                <>
                   <div
                     style={{
-                      width: 28,
-                      height: 28,
-                      borderRadius: 6,
-                      background: "#F4F4F0",
-                      border: "1px solid #E8E8E3",
+                      marginTop: 16,
+                      borderLeft: "3px solid var(--accent)",
+                      padding: "8px 0 8px 14px",
+                      fontFamily: "var(--font-serif)",
+                      fontStyle: "italic",
+                      fontSize: 15,
+                      lineHeight: 1.55,
+                    }}
+                  >
+                    “{chatterQuote.text}”
+                  </div>
+                  <div style={{ marginTop: 10, fontSize: 11.5, color: "var(--ink-40)" }}>
+                    {chatterQuote.handle ?? "Live source"}
+                  </div>
+                </>
+              )}
+            </>
+          ) : (
+            <div className="rl-gap">
+              <strong style={{ display: "block", color: "var(--ink)", marginBottom: 6 }}>
+                An honest gap
+              </strong>
+              No live chatter was retrieved for this club. We leave the panel empty rather than
+              quoting a press blurb.
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {placements.length > 0 && (
+        <Card id="placements" style={{ marginTop: 16 }}>
+          <div className="rl-eyebrow">Placements</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 16 }}>
+            {placements.map((p) => (
+              <span key={p.firm} className="rl-chip" style={{ fontSize: 13, padding: "6px 10px" }}>
+                {p.firm}
+              </span>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      <div
+        id="path"
+        style={{
+          background: "var(--navy)",
+          borderRadius: 16,
+          padding: "26px 28px",
+          margin: "16px 0 0",
+          color: "#fff",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+          <span className="rl-eyebrow" style={{ color: "rgba(255,255,255,.55)" }}>
+            Your path in
+          </span>
+          <span style={{ fontSize: 12.5, color: "rgba(255,255,255,.5)" }}>
+            {path.label ?? "No route on file"}
+          </span>
+        </div>
+        {path.hops.length === 0 ? (
+          <div
+            style={{
+              marginTop: 16,
+              fontSize: 13.5,
+              lineHeight: 1.6,
+              color: "rgba(255,255,255,.7)",
+            }}
+          >
+            We don&apos;t have a first- or second-degree path into this roster yet. Draft a coffee
+            chat with a listed member, or import LinkedIn connections on your profile.
+          </div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 20, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: "50%",
+                  background: "var(--accent)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 12,
+                  fontWeight: 700,
+                }}
+              >
+                {path.you.initials}
+              </div>
+              <span style={{ fontSize: 13.5 }}>You</span>
+            </div>
+            {path.hops.map((h) => (
+              <div key={h.id} style={{ display: "contents" }}>
+                <div style={{ flex: 1, minWidth: 24, height: 1, background: "rgba(255,255,255,.25)" }} />
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div
+                    style={{
+                      width: 38,
+                      height: 38,
+                      borderRadius: "50%",
+                      background: "rgba(255,255,255,.14)",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      fontSize: 10,
+                      fontSize: 12,
                       fontWeight: 700,
-                      color: "#8C8C85",
-                      flexShrink: 0,
                     }}
                   >
-                    {c.charAt(0)}
+                    {initials(h.name)}
                   </div>
-                  <span style={{ fontSize: 13, fontWeight: 500, color: "#0F0F0E" }}>{c}</span>
-                </div>
-              ))}
-            </div>
-          </SectionCard>
-        )}
-
-        {intel?.retreats && intel.retreats.length > 0 && (
-          <SectionCard title="Retreats & Social">
-            <div
-              style={{
-                height: 88,
-                borderRadius: 10,
-                background: `linear-gradient(135deg, ${colorFor(club.name)} 0%, #3B3BFF 100%)`,
-                marginBottom: 14,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <span style={{ color: "white", fontSize: 13, fontWeight: 600 }}>
-                🏔 {intel.retreats[0].place}
-              </span>
-            </div>
-            <ul style={{ display: "flex", flexDirection: "column", gap: 8, listStyle: "none", padding: 0, margin: 0 }}>
-              {intel.retreats.map((r, i) => (
-                <li key={i} style={{ fontSize: 13, lineHeight: 1.6, color: "#4A4A44" }}>
-                  <span style={{ fontWeight: 600, color: "#0F0F0E" }}>{r.place}</span>
-                  {r.note && <span> — {r.note}</span>}
-                </li>
-              ))}
-            </ul>
-          </SectionCard>
-        )}
-
-        {showSocialRow && (
-          <div
-            style={{
-              gridColumn: "1 / -1",
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 16,
-              alignItems: "stretch",
-            }}
-          >
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              {hasReddit && (
-                <SectionCard title="Reddit Sentiment">
-                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
-                    <div
-                      style={{
-                        flex: 1,
-                        height: 6,
-                        borderRadius: 3,
-                        background: "#E8E8E3",
-                        overflow: "hidden",
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: positive ? "74%" : "50%",
-                          height: "100%",
-                          borderRadius: 3,
-                          background: positive
-                            ? "linear-gradient(90deg, #22C55E 0%, #3B3BFF 100%)"
-                            : "linear-gradient(90deg, #F59E0B 0%, #3B3BFF 100%)",
-                        }}
-                      />
-                    </div>
-                    <span
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 600,
-                        color: positive ? "#22C55E" : "#F59E0B",
-                      }}
-                    >
-                      {sentimentLabel}
-                    </span>
-                  </div>
-                  {intel?.reddit_sentiment?.summary && (
-                    <p
-                      style={{
-                        fontSize: 13,
-                        lineHeight: 1.55,
-                        color: "#4A4A44",
-                        marginBottom: reddit.length ? 10 : 0,
-                        display: "-webkit-box",
-                        WebkitLineClamp: 3,
-                        WebkitBoxOrient: "vertical" as const,
-                        overflow: "hidden",
-                      }}
-                    >
-                      {intel.reddit_sentiment.summary}
-                    </p>
-                  )}
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {reddit.slice(0, 1).map((r) => (
-                      <a
-                        key={r.id}
-                        href={r.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{
-                          background: "#FAFAF7",
-                          border: "1px solid #E8E8E3",
-                          borderRadius: 10,
-                          padding: "10px 12px",
-                          textDecoration: "none",
-                          display: "block",
-                        }}
-                      >
-                        <p
-                          style={{
-                            fontSize: 12,
-                            lineHeight: 1.5,
-                            color: "#4A4A44",
-                            marginBottom: 6,
-                            display: "-webkit-box",
-                            WebkitLineClamp: 2,
-                            WebkitBoxOrient: "vertical" as const,
-                            overflow: "hidden",
-                          }}
-                        >
-                          {r.title}
-                        </p>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontSize: 11, color: "#8C8C85" }}>↑ {r.score}</span>
-                          {r.subreddit && (
-                            <span style={{ fontSize: 11, color: "#3B3BFF", fontWeight: 500 }}>
-                              r/{r.subreddit.replace(/^r\//, "")}
-                            </span>
-                          )}
-                          <span style={{ marginLeft: "auto", fontSize: 11, color: "#B0B0A8" }}>↗</span>
-                        </div>
-                      </a>
-                    ))}
-                  </div>
-                </SectionCard>
-              )}
-
-              {(hasPlacements || hasReddit) && (
-                <SectionCard title="Placements">
-                  {hasPlacements ? (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                      {visiblePlacementChips.map((p) => {
-                        const inner = (
-                          <span
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: 6,
-                              background: "#FAFAF7",
-                              border: "1px solid #E8E8E3",
-                              borderRadius: 8,
-                              padding: "6px 10px",
-                              fontSize: 12,
-                              fontWeight: 500,
-                              color: "#0F0F0E",
-                            }}
-                          >
-                            {p.firm}
-                            <span
-                              style={{
-                                fontSize: 11,
-                                fontWeight: 700,
-                                color: "#3B3BFF",
-                              }}
-                            >
-                              {p.count}
-                            </span>
-                          </span>
-                        );
-                        return p.source ? (
-                          <a
-                            key={p.firm}
-                            href={p.source}
-                            target="_blank"
-                            rel="noreferrer"
-                            style={{ textDecoration: "none" }}
-                          >
-                            {inner}
-                          </a>
-                        ) : (
-                          <span key={p.firm}>{inner}</span>
-                        );
-                      })}
-                      {hiddenPlacementCount > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => setPlacementsExpanded((v) => !v)}
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            background: "transparent",
-                            border: "1px dashed #C7C7C0",
-                            borderRadius: 8,
-                            padding: "6px 10px",
-                            fontSize: 12,
-                            fontWeight: 600,
-                            color: "#3B3BFF",
-                            cursor: "pointer",
-                            fontFamily: "'Inter', sans-serif",
-                          }}
-                        >
-                          {placementsExpanded
-                            ? "Show less"
-                            : `+${hiddenPlacementCount} more`}
-                        </button>
-                      )}
-                    </div>
-                  ) : (
-                    <p style={{ fontSize: 13, lineHeight: 1.6, color: "#8C8C85" }}>
-                      No placement signals yet for this club.
-                    </p>
-                  )}
-                </SectionCard>
-              )}
-            </div>
-
-            {hasX ? (
-              <SectionCard
-                title="Live X Chatter"
-                badge={
-                  <span
-                    style={{
-                      background: "#F4F4F0",
-                      border: "1px solid #E8E8E3",
-                      borderRadius: 6,
-                      padding: "1px 8px",
-                      fontSize: 10,
-                      fontWeight: 600,
-                      color: "#4A4A44",
-                    }}
-                  >
-                    via Grok x_search
+                  <span style={{ fontSize: 13.5 }}>
+                    {h.name}
+                    <br />
+                    <span style={{ color: "rgba(255,255,255,.5)", fontSize: 12 }}>{h.role}</span>
                   </span>
-                }
-              >
-                {intel?.x_sentiment?.summary && (
-                  <p style={{ fontSize: 13, lineHeight: 1.6, color: "#4A4A44", marginBottom: 12 }}>
-                    {intel.x_sentiment.summary}
-                  </p>
-                )}
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {(intel?.x_sentiment?.posts ?? []).slice(0, 3).map((p, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        background: "#FAFAF7",
-                        border: "1px solid #E8E8E3",
-                        borderRadius: 10,
-                        padding: "12px 14px",
-                      }}
-                    >
-                      <p
-                        style={{
-                          fontSize: 12,
-                          lineHeight: 1.6,
-                          color: "#4A4A44",
-                          marginBottom: p.handle ? 6 : 0,
-                        }}
-                      >
-                        &quot;{p.text}&quot;
-                      </p>
-                      {p.handle && (
-                        <span style={{ fontSize: 11, color: "#3B3BFF", fontWeight: 500 }}>
-                          {p.handle}
-                        </span>
-                      )}
-                    </div>
-                  ))}
                 </div>
-              </SectionCard>
-            ) : (
-              <div />
+              </div>
+            ))}
+            {path.hops[0] && (
+              <button
+                type="button"
+                onClick={() => setActive(path.hops[path.hops.length - 1])}
+                style={{
+                  marginLeft: "auto",
+                  padding: "12px 20px",
+                  borderRadius: 11,
+                  background: "#fff",
+                  color: "var(--navy)",
+                  fontSize: 13.5,
+                  fontWeight: 700,
+                  border: "none",
+                  cursor: "pointer",
+                }}
+              >
+                Draft intro
+              </button>
             )}
           </div>
         )}
-
-        {intel?.vibe && Object.keys(intel.vibe).length > 0 && (
-          <SectionCard
-            title="Vibe & Culture"
-            accent
-            full
-            badge={
-              <span
-                style={{
-                  background: "#FFFFFF",
-                  border: "1px solid #C7C7FF",
-                  borderRadius: 6,
-                  padding: "1px 8px",
-                  fontSize: 10,
-                  fontWeight: 600,
-                  color: "#3B3BFF",
-                }}
-              >
-                via Grok /stalk · X + Reddit + IG
-              </span>
-            }
-          >
-            {intel.vibe.headline && (
-              <p
-                style={{
-                  fontFamily: "'Newsreader', serif",
-                  fontSize: 20,
-                  fontWeight: 400,
-                  color: "#0F0F0E",
-                  marginBottom: 14,
-                  lineHeight: 1.35,
-                }}
-              >
-                {intel.vibe.headline}
-              </p>
-            )}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-              {vibeRows.map((row) => (
-                <div key={row.label} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: "#8C8C85",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.07em",
-                    }}
-                  >
-                    {row.label}
-                  </div>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: "#0F0F0E", lineHeight: 1.5 }}>
-                    {row.val}
-                  </div>
-                </div>
-              ))}
-            </div>
-            {intel.vibe.values && intel.vibe.values.length > 0 && (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 16 }}>
-                {intel.vibe.values.map((v, i) => (
-                  <span
-                    key={i}
-                    style={{
-                      background: "#FFFFFF",
-                      color: "#3B3BFF",
-                      border: "1px solid #C7C7FF",
-                      borderRadius: 6,
-                      padding: "2px 10px",
-                      fontSize: 11,
-                      fontWeight: 500,
-                    }}
-                  >
-                    {v}
-                  </span>
-                ))}
-              </div>
-            )}
-            {intel.vibe.source_note && (
-              <p style={{ fontSize: 11, color: "#8C8C85", marginTop: 12 }}>{intel.vibe.source_note}</p>
-            )}
-          </SectionCard>
-        )}
-
-        {hasRecruitment && (
-          <SectionCard
-            title="Recruitment timeline"
-            full
-            badge={
-              isProjectTeam ? (
-                <span
-                  style={{
-                    background: "#EBEBFF",
-                    color: "#3B3BFF",
-                    borderRadius: 6,
-                    padding: "1px 8px",
-                    fontSize: 10,
-                    fontWeight: 600,
-                  }}
-                >
-                  Engineering Project Teams
-                </span>
-              ) : undefined
-            }
-          >
-            {isProjectTeam && (
-              <p
-                style={{
-                  fontSize: 13,
-                  lineHeight: 1.55,
-                  color: "#4A4A44",
-                  marginBottom: 14,
-                }}
-              >
-                Two-step apply:{" "}
-                <a
-                  href="https://www.engineering.cornell.edu/engineering-student-project-teams/"
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: "#3B3BFF", fontWeight: 600 }}
-                >
-                  General Project Team Application
-                </a>{" "}
-                + this team&apos;s own application. Fall uses separate deadlines for
-                upperclass vs first-year/transfer.
-              </p>
-            )}
-
-            {recruitmentTracks.length > 1 && (
-              <div
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: 8,
-                  marginBottom: 16,
-                }}
-              >
-                {recruitmentTracks.map((track) => {
-                  const active = (activeRecruitTrack?.id ?? "") === track.id;
-                  return (
-                    <button
-                      key={track.id}
-                      type="button"
-                      onClick={() => setRecruitTrack(track.id)}
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: 10,
-                        border: `1.5px solid ${active ? "#3B3BFF" : "#E8E8E3"}`,
-                        background: active ? "#EBEBFF" : "#FFFFFF",
-                        color: active ? "#3B3BFF" : "#4A4A44",
-                        cursor: "pointer",
-                        textAlign: "left",
-                        fontFamily: "'Inter', sans-serif",
-                      }}
-                    >
-                      <div style={{ fontSize: 12, fontWeight: 700 }}>{track.title}</div>
-                      {track.subtitle && (
-                        <div style={{ fontSize: 10, color: active ? "#6B6BFF" : "#8C8C85", marginTop: 2 }}>
-                          {track.subtitle}
-                        </div>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            {activeRecruitTrack?.subtitle && recruitmentTracks.length === 1 && (
-              <p style={{ fontSize: 12, color: "#8C8C85", marginBottom: 12 }}>
-                {activeRecruitTrack.subtitle}
-              </p>
-            )}
-
-            {timelineSteps.length > 0 && (
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: `repeat(${Math.min(timelineSteps.length, 5)}, minmax(0, 1fr))`,
-                  gap: 12,
-                  marginBottom:
-                    intel?.interview?.tips?.length ||
-                    intel?.interview?.roles?.length ||
-                    intel?.interview?.tracks_roles?.length ||
-                    intel?.interview?.format_note ||
-                    intel?.interview?.notes
-                      ? 20
-                      : 0,
-                }}
-              >
-                {timelineSteps.map((step, i) => {
-                  const first = i === 0;
-                  return (
-                    <div key={`${step.label}-${i}`} style={{ position: "relative", minWidth: 0 }}>
-                      <div
-                        style={{
-                          background: first ? "#3B3BFF" : "#FFFFFF",
-                          border: `1.5px solid ${first ? "#3B3BFF" : "#E8E8E3"}`,
-                          borderRadius: 14,
-                          padding: "16px 14px",
-                          height: "100%",
-                          boxShadow: first ? "0 6px 18px rgba(59,59,255,0.18)" : "none",
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            gap: 8,
-                            marginBottom: 10,
-                          }}
-                        >
-                          <div
-                            style={{
-                              width: 24,
-                              height: 24,
-                              borderRadius: "50%",
-                              background: first ? "#FFFFFF" : "#EBEBFF",
-                              color: "#3B3BFF",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              fontSize: 11,
-                              fontWeight: 700,
-                              flexShrink: 0,
-                            }}
-                          >
-                            {i + 1}
-                          </div>
-                          {step.when && (
-                            <span
-                              style={{
-                                fontSize: 10,
-                                fontWeight: 600,
-                                color: first ? "rgba(255,255,255,0.85)" : "#8C8C85",
-                                textAlign: "right",
-                                lineHeight: 1.3,
-                              }}
-                            >
-                              {step.when}
-                            </span>
-                          )}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: 13,
-                            fontWeight: 700,
-                            color: first ? "#FFFFFF" : "#0F0F0E",
-                            marginBottom: 6,
-                            letterSpacing: "-0.01em",
-                            lineHeight: 1.3,
-                          }}
-                        >
-                          {step.label}
-                        </div>
-                        {step.detail !== step.label && (
-                          <div
-                            style={{
-                              fontSize: 11,
-                              lineHeight: 1.5,
-                              color: first ? "rgba(255,255,255,0.82)" : "#8C8C85",
-                            }}
-                          >
-                            {step.detail}
-                          </div>
-                        )}
-                      </div>
-                      {i < timelineSteps.length - 1 && (
-                        <div
-                          style={{
-                            position: "absolute",
-                            top: 26,
-                            right: -10,
-                            color: "#C4C4BC",
-                            fontSize: 14,
-                            fontWeight: 600,
-                            zIndex: 1,
-                          }}
-                        >
-                          →
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {(intel?.interview?.roles?.length || intel?.interview?.tracks_roles?.length) && (
-              <div style={{ marginBottom: 16 }}>
-                <div
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: "#8C8C85",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    marginBottom: 8,
-                  }}
-                >
-                  Tracks / roles
-                </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                  {(intel?.interview?.roles ?? intel?.interview?.tracks_roles ?? []).map((role) => (
-                    <span
-                      key={role}
-                      style={{
-                        background: "#EBEBFF",
-                        color: "#3B3BFF",
-                        borderRadius: 8,
-                        padding: "5px 10px",
-                        fontSize: 12,
-                        fontWeight: 600,
-                      }}
-                    >
-                      {role}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {!!intel?.interview?.tips?.length && (
-              <div style={{ marginBottom: intel?.interview?.format_note || intel?.interview?.notes ? 14 : 0 }}>
-                <div
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: "#8C8C85",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    marginBottom: 8,
-                  }}
-                >
-                  Prep tips
-                </div>
-                <ul
-                  style={{
-                    margin: 0,
-                    padding: 0,
-                    listStyle: "none",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 8,
-                  }}
-                >
-                  {intel!.interview!.tips!.slice(0, 5).map((tip, i) => (
-                    <li
-                      key={i}
-                      style={{
-                        fontSize: 13,
-                        lineHeight: 1.55,
-                        color: "#4A4A44",
-                        paddingLeft: 14,
-                        position: "relative",
-                      }}
-                    >
-                      <span
-                        style={{
-                          position: "absolute",
-                          left: 0,
-                          top: 8,
-                          width: 6,
-                          height: 6,
-                          borderRadius: "50%",
-                          background: "#3B3BFF",
-                        }}
-                      />
-                      {tip}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {(intel?.interview?.format_note || intel?.interview?.notes) && (
-              <p style={{ fontSize: 12, lineHeight: 1.55, color: "#8C8C85", marginTop: 4 }}>
-                {intel.interview.format_note || intel.interview.notes}
-              </p>
-            )}
-          </SectionCard>
-        )}
-
-        {peopleToMeet.length > 0 && (
-          <SectionCard title="People You Should Meet" full>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: `repeat(${Math.min(peopleToMeet.length, 3)}, 1fr)`,
-                gap: 14,
-              }}
-            >
-              {peopleToMeet.map((m) => {
-                const ig = instagramLink(m);
-                return (
-                  <div
-                    key={m.id}
-                    style={{
-                      background: "#FAFAF7",
-                      border: "1px solid #E8E8E3",
-                      borderRadius: 14,
-                      padding: 18,
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 10,
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                      <div
-                        style={{
-                          width: 40,
-                          height: 40,
-                          borderRadius: "50%",
-                          background: colorFor(m.name),
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          color: "white",
-                          fontSize: 12,
-                          fontWeight: 700,
-                          flexShrink: 0,
-                        }}
-                      >
-                        {initials(m.name)}
-                      </div>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: "#0F0F0E" }}>
-                          {m.name}
-                          {m.is_alumni && (
-                            <span
-                              style={{
-                                marginLeft: 6,
-                                background: "#F4F4F0",
-                                color: "#4A4A44",
-                                borderRadius: 4,
-                                padding: "1px 6px",
-                                fontSize: 10,
-                                fontWeight: 600,
-                              }}
-                            >
-                              alum
-                            </span>
-                          )}
-                        </div>
-                        <div style={{ fontSize: 11, color: "#8C8C85" }}>{m.role}</div>
-                      </div>
-                    </div>
-                    {m.relevance && (
-                      <p style={{ fontSize: 12, lineHeight: 1.5, color: "#4A4A44", fontStyle: "italic", flex: 1 }}>
-                        &quot;{m.relevance}&quot;
-                      </p>
-                    )}
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button
-                        onClick={() => setActive(m)}
-                        style={{
-                          flex: 1,
-                          padding: "8px 0",
-                          borderRadius: 8,
-                          background: "#3B3BFF",
-                          color: "#FFFFFF",
-                          border: "none",
-                          fontSize: 12,
-                          fontWeight: 600,
-                          cursor: "pointer",
-                          fontFamily: "'Inter', sans-serif",
-                        }}
-                      >
-                        Coffee chat →
-                      </button>
-                      <a
-                        href={linkedinConnect(m, club)}
-                        target="_blank"
-                        rel="noreferrer"
-                        title="LinkedIn"
-                        style={{
-                          padding: "8px 10px",
-                          borderRadius: 8,
-                          background: "#0077B5",
-                          color: "white",
-                          fontSize: 11,
-                          fontWeight: 700,
-                          textDecoration: "none",
-                        }}
-                      >
-                        in
-                      </a>
-                      {ig && (
-                        <a
-                          href={ig}
-                          target="_blank"
-                          rel="noreferrer"
-                          title="Instagram"
-                          style={{
-                            padding: "8px 10px",
-                            borderRadius: 8,
-                            background:
-                              "linear-gradient(135deg, #f09433 0%, #dc2743 50%, #bc1888 100%)",
-                            color: "white",
-                            fontSize: 11,
-                            fontWeight: 700,
-                            textDecoration: "none",
-                          }}
-                        >
-                          ig
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </SectionCard>
-        )}
-
-        {members.length > 0 && (
-          <SectionCard title="Member Roster" full>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-                gap: 12,
-              }}
-            >
-              {rosterSorted.map((m) => {
-                const ig = instagramLink(m);
-                return (
-                  <div
-                    key={m.id}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      background: "#FAFAF7",
-                      borderRadius: 10,
-                      padding: "10px 12px",
-                      border: "1px solid #E8E8E3",
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: 32,
-                        height: 32,
-                        borderRadius: "50%",
-                        background: colorFor(m.name),
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        color: "white",
-                        fontSize: 10,
-                        fontWeight: 700,
-                        flexShrink: 0,
-                      }}
-                    >
-                      {initials(m.name)}
-                    </div>
-                    <div style={{ minWidth: 0 }}>
-                      <div
-                        style={{
-                          fontSize: 12,
-                          fontWeight: 600,
-                          color: "#0F0F0E",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {m.name}
-                      </div>
-                      <div style={{ fontSize: 10, color: "#8C8C85" }}>
-                        {m.role}
-                        {m.is_alumni ? " · alum" : ""}
-                      </div>
-                      <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-                        <a
-                          href={linkedinConnect(m, club)}
-                          target="_blank"
-                          rel="noreferrer"
-                          style={{ color: "#0077B5", fontSize: 9, fontWeight: 600, textDecoration: "none" }}
-                        >
-                          in
-                        </a>
-                        {ig && (
-                          <a
-                            href={ig}
-                            target="_blank"
-                            rel="noreferrer"
-                            style={{ color: "#E4405F", fontSize: 9, fontWeight: 600, textDecoration: "none" }}
-                          >
-                            ig
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </SectionCard>
-        )}
       </div>
 
-      <div style={{ height: 60 }} />
-    </>
+      {peopleToMeet.length > 0 && (
+        <Card style={{ marginTop: 16 }}>
+          <div className="rl-eyebrow">People you should meet</div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: `repeat(${Math.min(peopleToMeet.length, 3)}, 1fr)`,
+              gap: 14,
+              marginTop: 16,
+            }}
+          >
+            {peopleToMeet.map((m) => (
+              <div
+                key={m.id}
+                style={{
+                  background: "var(--bg-sunken)",
+                  borderRadius: 14,
+                  padding: 18,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: "50%",
+                      background: colorFor(m.name),
+                      color: "#fff",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 12,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {initials(m.name)}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{m.name}</div>
+                    <div style={{ fontSize: 11, color: "var(--ink-45)" }}>{m.role}</div>
+                  </div>
+                </div>
+                {m.relevance && (
+                  <p style={{ fontSize: 12, lineHeight: 1.5, color: "var(--ink-55)", fontStyle: "italic" }}>
+                    “{m.relevance}”
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setActive(m)}
+                  className="rl-btn rl-btn-accent"
+                  style={{ padding: 8, borderRadius: 8, fontSize: 12 }}
+                >
+                  Coffee chat →
+                </button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {rosterSorted.length > 0 && (
+        <Card id="roster" style={{ marginTop: 16 }}>
+          <div className="rl-eyebrow">Roster</div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+              gap: 12,
+              marginTop: 16,
+            }}
+          >
+            {rosterSorted.map((m) => (
+              <div
+                key={m.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  background: "var(--bg-sunken)",
+                  borderRadius: 10,
+                  padding: "10px 12px",
+                }}
+              >
+                <div
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: "50%",
+                    background: colorFor(m.name),
+                    color: "#fff",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    flexShrink: 0,
+                  }}
+                >
+                  {initials(m.name)}
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 600,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {m.name}
+                  </div>
+                  <div style={{ fontSize: 10, color: "var(--ink-45)" }}>
+                    {m.role}
+                    {m.is_alumni ? " · alum" : ""}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                    <a href={linkedinConnect(m, club)} target="_blank" rel="noreferrer" style={{ fontSize: 9, fontWeight: 600, textDecoration: "none" }}>
+                      in
+                    </a>
+                    {instagramLink(m) && (
+                      <a href={instagramLink(m)!} target="_blank" rel="noreferrer" style={{ fontSize: 9, fontWeight: 600, textDecoration: "none" }}>
+                        ig
+                      </a>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
   );
 }

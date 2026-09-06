@@ -1,13 +1,26 @@
 const PALETTE = [
-  "#1A1A2E",
-  "#0A3D62",
-  "#7B2D00",
-  "#1B4F72",
-  "#2C3E50",
-  "#1A2980",
-  "#5B2C6F",
-  "#1A3A2A",
+  "#132441",
+  "#1b2f52",
+  "#0e1526",
+  "#153a2b",
+  "#4a1622",
+  "#1f2c4d",
+  "#241da8",
+  "#0b2419",
 ];
+
+export function relativeTime(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return null;
+  const mins = Math.max(0, Math.round((Date.now() - t) / 60000));
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} hour${hrs === 1 ? "" : "s"} ago`;
+  const days = Math.round(hrs / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
 
 export function monogram(name: string): string {
   const words = name

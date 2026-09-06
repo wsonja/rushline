@@ -3,68 +3,82 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { Wordmark } from "@/components/Wordmark";
+import { CampusToggle } from "@/components/Controls";
 import { getSupabase } from "@/lib/supabase";
+import {
+  campusLabel,
+  campusToSchool,
+  clubMatchesCampus,
+  schoolToCampus,
+  useCampus,
+  type Campus,
+} from "@/lib/prefs";
 import type { Profile } from "@/lib/types";
-import SchoolPicker from "@/components/SchoolPicker";
-import { useSchool } from "@/components/SchoolProvider";
-import { schoolShortLabel } from "@/lib/school";
+import { initials } from "@/lib/ui";
 
-const navItems = [
-  {
-    label: "Clubs",
-    path: "/clubs",
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-        <circle cx="9" cy="7" r="4" />
-        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-      </svg>
-    ),
-  },
-  {
-    label: "My Web",
-    path: "/network",
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="10" />
-        <line x1="2" y1="12" x2="22" y2="12" />
-        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1 4-10z" />
-      </svg>
-    ),
-  },
+const NAV = [
+  { label: "Clubs", path: "/clubs", key: "clubs" as const },
+  { label: "My web", path: "/network", key: "web" as const },
+  { label: "Outreach", path: "/outreach", key: "outreach" as const },
 ];
 
-function initialsFrom(name?: string | null, email?: string | null) {
-  if (name && name.trim()) {
-    const parts = name.trim().split(/\s+/);
-    return (parts[0][0] + (parts[1]?.[0] ?? "")).toUpperCase();
-  }
-  if (email) return email.slice(0, 2).toUpperCase();
-  return "··";
+function goalLabel(g: string): string {
+  return g.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-export default function Sidebar() {
+export default function Sidebar({
+  pageNav,
+  counts,
+}: {
+  pageNav?: React.ReactNode;
+  counts?: { clubs?: number; web?: number; outreach?: number };
+}) {
   const pathname = usePathname();
   const router = useRouter();
-  const { school } = useSchool();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [email, setEmail] = useState<string | null>(null);
+  const [clubCount, setClubCount] = useState(counts?.clubs ?? 0);
+  const { campus, setCampus } = useCampus();
 
   useEffect(() => {
     const sb = getSupabase();
-    sb.auth.getUser().then(async ({ data }) => {
+    (async () => {
+      const { data } = await sb.auth.getUser();
       setEmail(data.user?.email ?? null);
-      if (data.user) {
-        const { data: prof } = await sb
-          .from("profiles")
-          .select("*")
-          .eq("id", data.user.id)
-          .maybeSingle();
-        setProfile(prof as Profile | null);
-      }
-    });
-  }, []);
+      if (!data.user) return;
+      const { data: prof } = await sb
+        .from("profiles")
+        .select("*")
+        .eq("id", data.user.id)
+        .maybeSingle();
+      const p = prof as Profile | null;
+      setProfile(p);
+      if (p?.school) setCampus(schoolToCampus(p.school));
+    })();
+  }, [setCampus]);
+
+  useEffect(() => {
+    getSupabase()
+      .from("clubs")
+      .select("school")
+      .then(({ data }) => {
+        const n = ((data ?? []) as { school: string }[]).filter((c) =>
+          clubMatchesCampus(c.school, campus)
+        ).length;
+        setClubCount(n);
+      });
+  }, [campus]);
+
+  async function changeCampus(next: Campus) {
+    setCampus(next);
+    if (profile) {
+      await getSupabase()
+        .from("profiles")
+        .update({ school: campusToSchool(next) })
+        .eq("id", profile.id);
+    }
+  }
 
   async function signOut() {
     await getSupabase().auth.signOut();
@@ -72,64 +86,36 @@ export default function Sidebar() {
   }
 
   const displayName = profile?.full_name || email?.split("@")[0] || "Guest";
-  const sub = email ?? "Not signed in";
+  const goals = [
+    profile?.career_goal ? goalLabel(profile.career_goal) : null,
+    ...(profile?.target_clubs ?? []).map(goalLabel),
+  ].filter((g, i, a): g is string => Boolean(g) && a.indexOf(g) === i);
+
+  const showRanked = !pageNav && pathname?.startsWith("/clubs") && !pathname?.slice(7).includes("/");
 
   return (
-    <aside
-      style={{
-        width: 220,
-        minWidth: 220,
-        height: "100vh",
-        background: "#FFFFFF",
-        borderRight: "1px solid #E8E8E3",
-        display: "flex",
-        flexDirection: "column",
-        position: "sticky",
-        top: 0,
-      }}
-    >
-      <div style={{ padding: "24px 20px 16px", borderBottom: "1px solid #E8E8E3" }}>
-        <Link
-          href="/clubs"
-          style={{ display: "flex", alignItems: "center", gap: 8, textDecoration: "none" }}
-        >
-          <div
-            style={{
-              width: 28,
-              height: 28,
-              background: "#3B3BFF",
-              borderRadius: 7,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="white" />
-            </svg>
-          </div>
-          <span
-            style={{
-              fontWeight: 700,
-              fontSize: 16,
-              color: "#0F0F0E",
-              letterSpacing: "-0.02em",
-            }}
-          >
-            rushline
-          </span>
-        </Link>
-        <div style={{ marginTop: 14 }}>
-          <SchoolPicker compact />
-        </div>
-        <div style={{ marginTop: 8, fontSize: 11, color: "#8C8C85" }}>
-          Viewing {schoolShortLabel(school)} clubs
+    <aside className="rl-rail" style={{ width: 240 }}>
+      <div style={{ padding: 20 }}>
+        <Wordmark href="/clubs" size={30} wordSize={17} />
+      </div>
+      <div style={{ padding: "0 16px" }}>
+        <CampusToggle campus={campus} onChange={changeCampus} compact />
+        <div style={{ fontSize: 12, color: "var(--ink-42)", margin: "10px 4px 0" }}>
+          Viewing {clubCount || counts?.clubs || "—"} {campusLabel(campus)} clubs
         </div>
       </div>
-
-      <nav style={{ flex: 1, padding: "12px 10px", display: "flex", flexDirection: "column", gap: 2 }}>
-        {navItems.map((item) => {
-          const isActive = pathname?.startsWith(item.path);
+      <nav style={{ padding: "18px 16px", display: "flex", flexDirection: "column", gap: 4 }}>
+        {NAV.map((item) => {
+          const isActive =
+            item.path === "/clubs"
+              ? pathname === "/clubs" || pathname?.startsWith("/clubs/")
+              : pathname?.startsWith(item.path);
+          const count =
+            item.key === "clubs"
+              ? (counts?.clubs ?? clubCount)
+              : item.key === "web"
+                ? counts?.web
+                : counts?.outreach;
           return (
             <Link
               key={item.path}
@@ -137,28 +123,62 @@ export default function Sidebar() {
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: 10,
-                padding: "8px 10px",
-                borderRadius: 8,
+                justifyContent: "space-between",
+                padding: "11px 14px",
+                borderRadius: 10,
                 textDecoration: "none",
                 fontSize: 14,
-                fontWeight: 500,
-                color: isActive ? "#3B3BFF" : "#4A4A44",
-                background: isActive ? "#EBEBFF" : "transparent",
-                transition: "background 0.15s, color 0.15s",
+                fontWeight: 600,
+                color: isActive ? "var(--accent)" : "rgba(0,0,0,.6)",
+                background: isActive ? "var(--accent-tint)" : "transparent",
               }}
             >
-              {item.icon}
               {item.label}
+              {count != null && (
+                <span style={{ opacity: 0.6, fontWeight: 500 }}>{count}</span>
+              )}
             </Link>
           );
         })}
       </nav>
 
+      {pageNav ? (
+        <div style={{ margin: "10px 16px 0", paddingTop: 16, borderTop: "1px solid var(--divider)" }}>
+          {pageNav}
+        </div>
+      ) : showRanked ? (
+        <div style={{ margin: "6px 16px 0", paddingTop: 16, borderTop: "1px solid var(--divider)" }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-45)", marginBottom: 10 }}>
+            Ranked for
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {goals.slice(0, 4).map((g) => (
+              <span key={g} className="rl-chip rl-chip-accent" style={{ padding: "5px 10px", borderRadius: 8, fontSize: 12 }}>
+                {g}
+              </span>
+            ))}
+            <Link
+              href="/onboarding"
+              style={{
+                padding: "5px 10px",
+                borderRadius: 8,
+                border: "1px dashed rgba(0,0,0,.2)",
+                fontSize: 12,
+                color: "var(--ink-45)",
+                textDecoration: "none",
+              }}
+            >
+              + edit
+            </Link>
+          </div>
+        </div>
+      ) : null}
+
       <div
         style={{
-          padding: "14px 16px",
-          borderTop: "1px solid #E8E8E3",
+          marginTop: "auto",
+          padding: 16,
+          borderTop: "1px solid var(--divider)",
           display: "flex",
           alignItems: "center",
           gap: 10,
@@ -169,58 +189,32 @@ export default function Sidebar() {
             width: 32,
             height: 32,
             borderRadius: "50%",
-            background: "linear-gradient(135deg, #3B3BFF 0%, #7B7BFF 100%)",
+            background: "var(--accent)",
+            color: "#fff",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            color: "white",
-            fontSize: 12,
-            fontWeight: 600,
+            fontSize: 11.5,
+            fontWeight: 700,
             flexShrink: 0,
           }}
         >
-          {initialsFrom(profile?.full_name, email)}
+          {initials(displayName)}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              color: "#0F0F0E",
-              lineHeight: 1.3,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
+          <div style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {displayName}
           </div>
-          <div
-            style={{
-              fontSize: 11,
-              color: "#8C8C85",
-              lineHeight: 1.3,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {sub}
+          <div style={{ fontSize: 11.5, color: "var(--ink-45)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {email ?? "Not signed in"}
           </div>
         </div>
         <button
           onClick={signOut}
           title="Sign out"
-          style={{
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            color: "#8C8C85",
-            display: "flex",
-            padding: 4,
-          }}
+          style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-45)", padding: 4 }}
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
             <polyline points="16 17 21 12 16 7" />
             <line x1="21" y1="12" x2="9" y2="12" />

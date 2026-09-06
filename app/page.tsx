@@ -1,178 +1,247 @@
 "use client";
 
 import Link from "next/link";
-import SchoolPicker from "@/components/SchoolPicker";
-import { useSchool } from "@/components/SchoolProvider";
-import { schoolShortLabel } from "@/lib/school";
+import { useEffect, useState } from "react";
+import { ClubArc, SAMPLE_ARC } from "@/components/ClubArc";
+import { CampusToggle, ReduceMotionToggle } from "@/components/Controls";
+import { Wordmark } from "@/components/Wordmark";
+import {
+  campusLabel,
+  clubMatchesCampus,
+  useCampus,
+  useReduceMotion,
+} from "@/lib/prefs";
+import { getSupabase } from "@/lib/supabase";
 
 export default function Home() {
-  const { school } = useSchool();
-  const short = schoolShortLabel(school);
-  const isCornell = school === "Cornell";
+  const { campus, setCampus } = useCampus();
+  const { reduceMotion, setReduceMotion } = useReduceMotion();
+  const [clubCount, setClubCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    const sb = getSupabase();
+    (async () => {
+      try {
+        const { data } = await sb.from("clubs").select("school");
+        const rows = (data ?? []) as { school: string }[];
+        setClubCount(rows.filter((c) => clubMatchesCampus(c.school, campus)).length);
+      } catch {
+        setClubCount(null);
+      }
+    })();
+  }, [campus]);
+
+  const campusName = campusLabel(campus);
+  const n = clubCount ?? 119;
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        background: "#FAFAF7",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        padding: "0 24px 80px",
-      }}
-    >
-      <div
+    <main style={{ minHeight: "100vh", background: "var(--bg-page)", color: "var(--ink)", overflowX: "hidden" }}>
+      <header
         style={{
-          position: "fixed",
-          top: 24,
-          left: 32,
-          right: 32,
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          zIndex: 10,
+          padding: "20px 34px",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div
-            style={{
-              width: 26,
-              height: 26,
-              background: "#3B3BFF",
-              borderRadius: 6,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="white" />
-            </svg>
-          </div>
-          <span style={{ fontWeight: 700, fontSize: 15, color: "#0F0F0E", letterSpacing: "-0.02em" }}>
-            rushline
-          </span>
+        <Wordmark />
+        <div style={{ display: "flex", alignItems: "center", gap: 22 }}>
+          <a href="#how" style={{ fontSize: 13.5, color: "var(--ink-55)", textDecoration: "none" }}>
+            How it works
+          </a>
+          <Link href="/clubs" style={{ fontSize: 13.5, color: "var(--ink-55)", textDecoration: "none" }}>
+            Clubs
+          </Link>
+          <ReduceMotionToggle on={reduceMotion} onChange={setReduceMotion} />
+          <CampusToggle campus={campus} onChange={setCampus} />
         </div>
-        <SchoolPicker />
-      </div>
+      </header>
 
-      <div
-        style={{
-          maxWidth: 780,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          textAlign: "center",
-          paddingTop: 140,
-        }}
-      >
-        <span
+      <div style={{ padding: "52px 34px 0", textAlign: "center" }}>
+        <div
           style={{
-            background: "#EBEBFF",
-            color: "#3B3BFF",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 9,
+            padding: "8px 16px",
             borderRadius: 999,
-            padding: "4px 14px",
-            fontSize: 12,
+            background: "var(--accent-tint)",
+            color: "var(--accent)",
+            fontSize: 13,
             fontWeight: 600,
-            marginBottom: 28,
           }}
         >
-          {isCornell
-            ? "Cornell · campus clubs · live demo"
-            : "UC Berkeley · consulting clubs · live demo"}
-        </span>
+          <span
+            className="rl-pulse"
+            style={{
+              width: 7,
+              height: 7,
+              borderRadius: "50%",
+              background: "var(--accent)",
+              animation: "rl-pulse 2.2s ease-in-out infinite",
+            }}
+          />
+          {campusName} · {n} clubs · scraped from primary sources
+        </div>
         <h1
           style={{
-            fontFamily: "'Newsreader', serif",
-            fontSize: 58,
+            margin: "26px auto 0",
+            maxWidth: "19ch",
+            fontFamily: "var(--font-serif)",
             fontWeight: 400,
-            lineHeight: 1.1,
-            letterSpacing: "-0.02em",
-            color: "#0F0F0E",
+            fontSize: "clamp(42px, 7vw, 78px)",
+            lineHeight: 1.02,
+            letterSpacing: "-0.025em",
           }}
         >
-          Recruit with an <span style={{ color: "#3B3BFF", fontStyle: "italic" }}>insider&apos;s edge</span>.
+          Recruit with an <em style={{ color: "var(--accent)", fontStyle: "italic" }}>insider&apos;s edge</em>.
         </h1>
-        <p style={{ marginTop: 24, maxWidth: 620, fontSize: 17, lineHeight: 1.6, color: "#8C8C85" }}>
-          Club recruiting is won on information asymmetry. rushline aggregates
-          real scraped signals — club sites, Reddit, live X chatter, member
-          profiles — into personalized {short} club pages built from ground truth, not
-          self-reported blurbs.
+        <p
+          style={{
+            margin: "22px auto 0",
+            maxWidth: "60ch",
+            fontSize: 17,
+            lineHeight: 1.6,
+            color: "var(--ink-55)",
+            textWrap: "pretty",
+          }}
+        >
+          Club recruiting is won on information asymmetry. rushline reads the primary sources — club
+          sites, rosters, Reddit, live chatter — and hands you the ground truth behind every
+          self-reported blurb.
         </p>
-        <div style={{ marginTop: 40, display: "flex", gap: 12 }}>
-          <Link
-            href="/login"
-            style={{
-              padding: "13px 28px",
-              borderRadius: 10,
-              background: "#3B3BFF",
-              color: "#FFFFFF",
-              fontSize: 14,
-              fontWeight: 600,
-              textDecoration: "none",
-              letterSpacing: "-0.01em",
-            }}
-          >
-            Get started
-          </Link>
-          <Link
-            href={`/clubs?school=${isCornell ? "cornell" : "berkeley"}`}
-            style={{
-              padding: "13px 28px",
-              borderRadius: 10,
-              background: "#FFFFFF",
-              border: "1.5px solid #E8E8E3",
-              color: "#4A4A44",
-              fontSize: 14,
-              fontWeight: 500,
-              textDecoration: "none",
-            }}
-          >
-            Browse {short} clubs
-          </Link>
+      </div>
+
+      <ClubArc
+        cards={SAMPLE_ARC}
+        reduceMotion={reduceMotion}
+        cta={
+          <>
+            <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+              <Link
+                href="/login"
+                className="rl-btn rl-btn-accent"
+                style={{ padding: "15px 30px", borderRadius: 12, fontSize: 15 }}
+              >
+                Get started
+              </Link>
+              <Link
+                href="/clubs"
+                className="rl-btn rl-btn-ghost"
+                style={{ padding: "15px 30px", borderRadius: 12, fontSize: 15 }}
+              >
+                Browse {campusName} clubs
+              </Link>
+            </div>
+            <div style={{ marginTop: 16, fontSize: 12.5, color: "var(--ink-42)" }}>
+              Scroll and the deck deals itself — your ranked matches, in order.
+            </div>
+          </>
+        }
+      />
+
+      <div
+        id="how"
+        className="rl-features"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3, 1fr)",
+          gap: 16,
+          padding: "8px 34px 40px",
+        }}
+      >
+        <div className="rl-card" style={{ padding: "22px 24px", borderRadius: 14 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-0.01em" }}>
+            Real intel, not blurbs
+          </div>
+          <p style={{ margin: "10px 0 0", fontSize: 13.5, lineHeight: 1.6, color: "var(--ink-55)" }}>
+            Clients, retreats, interview format and sentiment — every claim footnoted to the
+            document it came from.
+          </p>
+          <div style={{ marginTop: 14, display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <span className="rl-chip">6 sources</span>
+            <span className="rl-chip">cited</span>
+          </div>
+        </div>
+        <div className="rl-card" style={{ padding: "22px 24px", borderRadius: 14 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-0.01em" }}>
+            People you should meet
+          </div>
+          <p style={{ margin: "10px 0 0", fontSize: 13.5, lineHeight: 1.6, color: "var(--ink-55)" }}>
+            A roster of members and alumni ranked to your goals, with a first message already
+            drafted.
+          </p>
+          <div style={{ marginTop: 14, display: "flex", alignItems: "center" }}>
+            <div style={{ display: "flex" }}>
+              {[
+                ["AK", "#132441"],
+                ["LH", "#3b33f0"],
+                ["LL", "#7a3a12"],
+              ].map(([t, bg], i) => (
+                <div
+                  key={t}
+                  style={{
+                    width: 26,
+                    height: 26,
+                    borderRadius: "50%",
+                    background: bg,
+                    color: "#fff",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    border: "2px solid #fff",
+                    marginLeft: i ? -8 : 0,
+                  }}
+                >
+                  {t}
+                </div>
+              ))}
+            </div>
+            <span style={{ fontSize: 11.5, color: "var(--ink-45)", marginLeft: 10 }}>
+              7 warm intros
+            </span>
+          </div>
+        </div>
+        <div
+          style={{
+            background: "var(--navy)",
+            borderRadius: 14,
+            padding: "22px 24px",
+            color: "#fff",
+          }}
+        >
+          <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-0.01em" }}>
+            Your social web
+          </div>
+          <p style={{ margin: "10px 0 0", fontSize: 13.5, lineHeight: 1.6, color: "rgba(255,255,255,.62)" }}>
+            An interactive graph of who you know and the shortest path into any target club.
+          </p>
+          <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 7 }}>
+            <div style={{ width: 11, height: 11, borderRadius: "50%", background: "var(--accent)" }} />
+            <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,.3)" }} />
+            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "rgba(255,255,255,.6)" }} />
+            <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,.3)" }} />
+            <div style={{ width: 13, height: 13, borderRadius: "50%", background: "#fff" }} />
+            <span style={{ fontSize: 11.5, color: "rgba(255,255,255,.6)", marginLeft: 6 }}>2 hops</span>
+          </div>
         </div>
       </div>
 
-      <div
+      <footer
         style={{
-          marginTop: 90,
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-          gap: 16,
-          width: "100%",
-          maxWidth: 900,
+          display: "flex",
+          justifyContent: "space-between",
+          padding: "18px 34px",
+          borderTop: "1px solid var(--divider)",
+          fontSize: 12,
+          color: "var(--ink-42)",
         }}
       >
-        {[
-          {
-            t: "Real intel, not blurbs",
-            d: "Clients, retreats, interview format, and Reddit + X sentiment scraped from primary sources.",
-          },
-          {
-            t: "People you should meet",
-            d: "A roster of current members and alumni ranked to your goals, with one-click outreach.",
-          },
-          {
-            t: "Your social web",
-            d: "An interactive graph of who you know and the shortest path into any target club.",
-          },
-        ].map((f) => (
-          <div
-            key={f.t}
-            style={{
-              background: "#FFFFFF",
-              border: "1px solid #E8E8E3",
-              borderRadius: 16,
-              padding: "22px 24px",
-              textAlign: "left",
-              boxShadow: "0 1px 4px rgba(0,0,0,0.03)",
-            }}
-          >
-            <div style={{ fontSize: 14, fontWeight: 600, color: "#0F0F0E" }}>{f.t}</div>
-            <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.6, color: "#8C8C85" }}>{f.d}</div>
-          </div>
-        ))}
-      </div>
+        <span>rushline — built from primary sources</span>
+        <span>No dark patterns · citations on every claim</span>
+      </footer>
     </main>
   );
 }
