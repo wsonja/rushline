@@ -10,7 +10,7 @@ import { clubEvidence, hopsLabel, type EvidenceLine } from "@/lib/evidence";
 import {
   campusLabel,
   clubMatchesCampus,
-  schoolToCampus,
+  useCampus,
 } from "@/lib/prefs";
 import { getSupabase } from "@/lib/supabase";
 import { matchReason, matchSubline, scoreClubDetailed } from "@/lib/rank";
@@ -56,6 +56,7 @@ function EvidenceCell({ lines }: { lines: EvidenceLine[] }) {
 
 export default function ClubsPage() {
   const router = useRouter();
+  const { campus } = useCampus();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [clubs, setClubs] = useState<Club[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -151,7 +152,6 @@ export default function ClubsPage() {
     })();
   }, [router]);
 
-  const campus = schoolToCampus(profile?.school);
   const campusClubs = useMemo(
     () => clubs.filter((c) => clubMatchesCampus(c.school, campus)),
     [clubs, campus]

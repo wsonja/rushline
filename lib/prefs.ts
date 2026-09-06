@@ -34,6 +34,8 @@ function readFlag(key: string): boolean | null {
   return null;
 }
 
+const CAMPUS_EVENT = "rushline:campus";
+
 export function useCampus(initial?: Campus) {
   const [campus, setCampusState] = useState<Campus>(initial ?? "cornell");
 
@@ -44,11 +46,18 @@ export function useCampus(initial?: Campus) {
     } else if (initial) {
       setCampusState(initial);
     }
+    const onCampus = (e: Event) => {
+      const next = (e as CustomEvent<Campus>).detail;
+      if (next === "berkeley" || next === "cornell") setCampusState(next);
+    };
+    window.addEventListener(CAMPUS_EVENT, onCampus);
+    return () => window.removeEventListener(CAMPUS_EVENT, onCampus);
   }, [initial]);
 
   const setCampus = useCallback((next: Campus) => {
     setCampusState(next);
     localStorage.setItem(CAMPUS_KEY, next);
+    window.dispatchEvent(new CustomEvent(CAMPUS_EVENT, { detail: next }));
   }, []);
 
   return { campus, setCampus };
