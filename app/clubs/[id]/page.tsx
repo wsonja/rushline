@@ -207,9 +207,9 @@ export default function ClubDetail({
       <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 13, color: "rgba(0,0,0,.55)" }}>
         {(isCornellProjectTeam(club)
           ? [
-              JUMP[0],
+              ...JUMP.slice(0, 4),
               { id: "recruiting", label: "Recruiting" },
-              ...JUMP.slice(1),
+              ...JUMP.slice(4),
             ]
           : JUMP
         ).map((j) => (
@@ -570,44 +570,6 @@ export default function ClubDetail({
         </Card>
       </div>
 
-      {isCornellProjectTeam(club) && (
-        <Card id="recruiting" style={{ marginTop: 16 }}>
-          <div className="rl-eyebrow">Recruiting</div>
-          <p style={{ margin: "10px 0 0", fontSize: 13.5, lineHeight: 1.55, color: "var(--ink-70)" }}>
-            {projectTeamDeadlineLine(club)}
-          </p>
-          {projectTeamTracks(club).map((track) => (
-            <div key={track.id} style={{ marginTop: 18 }}>
-              <div style={{ fontSize: 14, fontWeight: 600 }}>{track.title}</div>
-              {track.subtitle && (
-                <div style={{ fontSize: 12, color: "var(--ink-45)", marginTop: 4 }}>{track.subtitle}</div>
-              )}
-              <ol style={{ margin: "10px 0 0", paddingLeft: 18, fontSize: 13.5, lineHeight: 1.55 }}>
-                {track.steps.map((s) => (
-                  <li key={s.label} style={{ marginBottom: 8 }}>
-                    <span style={{ fontWeight: 600 }}>{s.label}</span>
-                    {s.when ? <span style={{ color: "var(--ink-50)" }}> · {s.when}</span> : null}
-                    {s.detail ? (
-                      <div style={{ color: "var(--ink-60)", fontSize: 13 }}>{s.detail}</div>
-                    ) : null}
-                  </li>
-                ))}
-              </ol>
-            </div>
-          ))}
-          <div style={{ marginTop: 12, fontSize: 12.5 }}>
-            <a
-              href={club.slug === "cornell-appdev" ? APPDEV_APPLY_URL : DUFFIELD_JOIN_URL}
-              target="_blank"
-              rel="noreferrer"
-              style={{ color: "var(--accent)" }}
-            >
-              {club.slug === "cornell-appdev" ? "cornellappdev.com/apply" : "Duffield join a project team"} ↗
-            </a>
-          </div>
-        </Card>
-      )}
-
       {placements.length > 0 && (
         <Card id="placements" style={{ marginTop: 16 }}>
           <div className="rl-eyebrow">Placements</div>
@@ -854,6 +816,44 @@ export default function ClubDetail({
                 </div>
               </div>
             ))}
+          </div>
+        </Card>
+      )}
+
+      {isCornellProjectTeam(club) && (
+        <Card id="recruiting" style={{ marginTop: 16 }}>
+          <div className="rl-eyebrow">Recruiting</div>
+          <p style={{ margin: "10px 0 0", fontSize: 13.5, lineHeight: 1.55, color: "var(--ink-70)" }}>
+            {projectTeamDeadlineLine(club)}
+          </p>
+          {projectTeamTracks(club).map((track) => (
+            <div key={track.id} style={{ marginTop: 18 }}>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>{track.title}</div>
+              {track.subtitle && (
+                <div style={{ fontSize: 12, color: "var(--ink-45)", marginTop: 4 }}>{track.subtitle}</div>
+              )}
+              <ol style={{ margin: "10px 0 0", paddingLeft: 18, fontSize: 13.5, lineHeight: 1.55 }}>
+                {track.steps.map((s) => (
+                  <li key={s.label} style={{ marginBottom: 8 }}>
+                    <span style={{ fontWeight: 600 }}>{s.label}</span>
+                    {s.when ? <span style={{ color: "var(--ink-50)" }}> · {s.when}</span> : null}
+                    {s.detail ? (
+                      <div style={{ color: "var(--ink-60)", fontSize: 13 }}>{s.detail}</div>
+                    ) : null}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ))}
+          <div style={{ marginTop: 12, fontSize: 12.5 }}>
+            <a
+              href={club.slug === "cornell-appdev" ? APPDEV_APPLY_URL : DUFFIELD_JOIN_URL}
+              target="_blank"
+              rel="noreferrer"
+              style={{ color: "var(--accent)" }}
+            >
+              {club.slug === "cornell-appdev" ? "cornellappdev.com/apply" : "Duffield join a project team"} ↗
+            </a>
           </div>
         </Card>
       )}
