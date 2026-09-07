@@ -1,9 +1,8 @@
 "use client";
 
-import { use, useEffect, useMemo, useState } from "react";
+import { use, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
-import { ScoreBar } from "@/components/Controls";
 import CoffeeChatDrawer from "@/components/CoffeeChatDrawer";
 import { citeReview, confidenceLabel } from "@/lib/evidence";
 import { getSupabase } from "@/lib/supabase";
@@ -28,7 +27,6 @@ import type {
   ClubIntel,
   Member,
   Profile,
-  RedditPost,
   UserConnection,
 } from "@/lib/types";
 
@@ -54,13 +52,15 @@ function Card({
   id,
   children,
   style,
+  cardRef,
 }: {
   id?: string;
   children: React.ReactNode;
   style?: React.CSSProperties;
+  cardRef?: React.Ref<HTMLDivElement>;
 }) {
   return (
-    <div id={id} className="rl-card" style={{ padding: 28, borderRadius: 16, ...style }}>
+    <div id={id} ref={cardRef} className="rl-card" style={{ padding: 28, borderRadius: 16, ...style }}>
       {children}
     </div>
   );
@@ -68,7 +68,6 @@ function Card({
 
 const JUMP = [
   { id: "review", label: "The review" },
-  { id: "sentiment", label: "Sentiment" },
   { id: "placements", label: "Placements" },
   { id: "roster", label: "Roster" },
   { id: "path", label: "Your path in" },
@@ -84,7 +83,6 @@ export default function ClubDetail({
   const [intel, setIntel] = useState<ClubIntel | null>(null);
   const [intelUpdated, setIntelUpdated] = useState<string | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
-  const [reddit, setReddit] = useState<RedditPost[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [connections, setConnections] = useState<UserConnection[]>([]);
   const [active, setActive] = useState<Member | null>(null);
@@ -92,21 +90,24 @@ export default function ClubDetail({
   const [tracked, setTracked] = useState(false);
   const [activeJump, setActiveJump] = useState("review");
   const [hoverSrc, setHoverSrc] = useState<number | null>(null);
+  const [recruitingOpen, setRecruitingOpen] = useState(false);
+  const reviewRef = useRef<HTMLDivElement>(null);
+  const recruitBodyRef = useRef<HTMLDivElement>(null);
+  const [reviewH, setReviewH] = useState<number | null>(null);
+  const [recruitOverflows, setRecruitOverflows] = useState(false);
 
   useEffect(() => {
     const sb = getSupabase();
     (async () => {
-      const [{ data: c }, { data: it }, { data: mem }, { data: rp }] = await Promise.all([
+      const [{ data: c }, { data: it }, { data: mem }] = await Promise.all([
         sb.from("clubs").select("*").eq("id", id).maybeSingle(),
         sb.from("club_intel").select("*").eq("club_id", id).maybeSingle(),
         sb.from("members").select("*").eq("club_id", id),
-        sb.from("reddit_posts").select("*").eq("club_id", id),
       ]);
       setClub(c as Club | null);
       setIntel(it as ClubIntel | null);
       setIntelUpdated((it as { updated_at?: string } | null)?.updated_at ?? null);
       setMembers((mem as Member[]) ?? []);
-      setReddit((rp as RedditPost[]) ?? []);
       const { data: userData } = await sb.auth.getUser();
       if (userData.user) {
         const [{ data: prof }, connRes] = await Promise.all([
@@ -144,6 +145,22 @@ export default function ClubDetail({
     if (!sources.length) return { html: text, used: [] as number[] };
     return citeReview(text, sources.length);
   }, [intel?.review, sources.length]);
+
+  useEffect(() => {
+    const el = reviewRef.current;
+    if (!el) return;
+    const measure = () => setReviewH(el.offsetHeight);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [cited, intel, club]);
+
+  useEffect(() => {
+    const body = recruitBodyRef.current;
+    if (!body || reviewH == null) return;
+    setRecruitOverflows(body.scrollHeight > reviewH - 24);
+  }, [reviewH, club, recruitingOpen]);
 
   const deadlineHint = useMemo(() => {
     if (isCornellProjectTeam(club)) return projectTeamDeadlineLine(club);
@@ -189,10 +206,6 @@ export default function ClubDetail({
         club.tagline,
         intel?.review,
         `Sources: ${sources.map((s, i) => `${i + 1}. ${s.label}`).join("; ")}`,
-        intel?.reddit_sentiment?.summary
-          ? `Reddit: ${intel.reddit_sentiment.summary}`
-          : "Reddit: no data",
-        intel?.x_sentiment?.summary ? `Chatter: ${intel.x_sentiment.summary}` : "",
         `Roster: ${members.slice(0, 12).map((m) => `${m.name} (${m.role})`).join(", ")}`,
       ]
         .filter(Boolean)
@@ -206,11 +219,7 @@ export default function ClubDetail({
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 13, color: "rgba(0,0,0,.55)" }}>
         {(isCornellProjectTeam(club)
-          ? [
-              ...JUMP.slice(0, 4),
-              { id: "recruiting", label: "Recruiting" },
-              ...JUMP.slice(4),
-            ]
+          ? [JUMP[0], { id: "recruiting", label: "Recruiting" }, ...JUMP.slice(1)]
           : JUMP
         ).map((j) => (
           <a
@@ -269,8 +278,6 @@ export default function ClubDetail({
       </div>
     );
 
-  const redditEmpty = reddit.length === 0 && !intel?.reddit_sentiment?.summary;
-  const chatterQuote = intel?.x_sentiment?.posts?.[0];
   const placements = intel?.placements ?? [];
 
   return shell(
@@ -413,7 +420,16 @@ export default function ClubDetail({
         </div>
       </Card>
 
-      <Card id="review" style={{ marginTop: 16 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: isCornellProjectTeam(club) ? "1fr 1fr" : "1fr",
+          gap: 16,
+          marginTop: 16,
+          alignItems: "start",
+        }}
+      >
+      <Card id="review" cardRef={reviewRef}>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
           <div className="rl-eyebrow">The review</div>
           <div style={{ fontSize: 12.5, color: "var(--ink-40)" }}>
@@ -478,96 +494,89 @@ export default function ClubDetail({
         )}
       </Card>
 
-      <div id="sentiment" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
-        <Card>
-          <div className="rl-eyebrow">Reddit sentiment</div>
-          {redditEmpty ? (
-            <>
-              <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 16 }}>
-                <ScoreBar value={34} warn />
-                <span style={{ fontSize: 13, fontWeight: 700, color: "var(--warn-text)" }}>No data</span>
+      {isCornellProjectTeam(club) && (
+        <Card
+          id="recruiting"
+          style={{
+            position: "relative",
+            maxHeight: recruitingOpen ? undefined : reviewH ?? undefined,
+            minHeight: recruitingOpen ? undefined : reviewH ?? undefined,
+            overflow: recruitingOpen ? "visible" : "hidden",
+            paddingBottom: !recruitingOpen && recruitOverflows ? 56 : 28,
+          }}
+        >
+          <div ref={recruitBodyRef}>
+            <div className="rl-eyebrow">Recruiting</div>
+            <p style={{ margin: "10px 0 0", fontSize: 13.5, lineHeight: 1.55, color: "var(--ink-70)" }}>
+              {projectTeamDeadlineLine(club)}
+            </p>
+            {projectTeamTracks(club).map((track) => (
+              <div key={track.id} style={{ marginTop: 18 }}>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>{track.title}</div>
+                {track.subtitle && (
+                  <div style={{ fontSize: 12, color: "var(--ink-45)", marginTop: 4 }}>{track.subtitle}</div>
+                )}
+                <ol style={{ margin: "10px 0 0", paddingLeft: 18, fontSize: 13.5, lineHeight: 1.55 }}>
+                  {track.steps.map((s) => (
+                    <li key={s.label} style={{ marginBottom: 8 }}>
+                      <span style={{ fontWeight: 600 }}>{s.label}</span>
+                      {s.when ? <span style={{ color: "var(--ink-50)" }}> · {s.when}</span> : null}
+                      {s.detail ? (
+                        <div style={{ color: "var(--ink-60)", fontSize: 13 }}>{s.detail}</div>
+                      ) : null}
+                    </li>
+                  ))}
+                </ol>
               </div>
-              <div className="rl-gap">
-                <strong style={{ display: "block", color: "var(--ink)", marginBottom: 6 }}>
-                  An honest gap
-                </strong>
-                This pass retrieved no usable subreddit threads
-                {intelUpdated ? ` (${relativeTime(intelUpdated)})` : ""}. An older note is superseded
-                by this gap rather than backfilled — we don&apos;t invent sentiment.
-              </div>
-            </>
-          ) : (
-            <>
-              <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 16 }}>
-                <ScoreBar
-                  value={
-                    intel?.reddit_sentiment?.vibe === "positive"
-                      ? 74
-                      : intel?.reddit_sentiment?.vibe === "negative"
-                        ? 32
-                        : 50
-                  }
-                  warn={intel?.reddit_sentiment?.vibe !== "positive"}
-                />
-                <span style={{ fontSize: 13, fontWeight: 700 }}>
-                  {intel?.reddit_sentiment?.vibe === "positive"
-                    ? "Mostly positive"
-                    : intel?.reddit_sentiment?.vibe === "negative"
-                      ? "Mostly negative"
-                      : "Mixed"}
-                </span>
-              </div>
-              {intel?.reddit_sentiment?.summary && (
-                <p style={{ margin: "14px 0 0", fontSize: 13.5, lineHeight: 1.6, color: "var(--ink-70)" }}>
-                  {intel.reddit_sentiment.summary}
-                </p>
-              )}
-            </>
-          )}
-        </Card>
-        <Card>
-          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-            <span className="rl-eyebrow">Live chatter</span>
-            <span className="rl-chip">Proxied · LinkedIn + IG</span>
+            ))}
+            <div style={{ marginTop: 12, fontSize: 12.5 }}>
+              <a
+                href={club.slug === "cornell-appdev" ? APPDEV_APPLY_URL : DUFFIELD_JOIN_URL}
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: "var(--accent)" }}
+              >
+                {club.slug === "cornell-appdev" ? "cornellappdev.com/apply" : "Duffield join a project team"} ↗
+              </a>
+            </div>
           </div>
-          {intel?.x_sentiment?.summary || chatterQuote ? (
-            <>
-              {intel?.x_sentiment?.summary && (
-                <p style={{ margin: "16px 0 0", fontSize: 13.5, lineHeight: 1.6, color: "var(--ink-70)" }}>
-                  {intel.x_sentiment.summary}
-                </p>
-              )}
-              {chatterQuote && (
-                <>
-                  <div
-                    style={{
-                      marginTop: 16,
-                      borderLeft: "3px solid var(--accent)",
-                      padding: "8px 0 8px 14px",
-                      fontFamily: "var(--font-serif)",
-                      fontStyle: "italic",
-                      fontSize: 15,
-                      lineHeight: 1.55,
-                    }}
-                  >
-                    “{chatterQuote.text}”
-                  </div>
-                  <div style={{ marginTop: 10, fontSize: 11.5, color: "var(--ink-40)" }}>
-                    {chatterQuote.handle ?? "Live source"}
-                  </div>
-                </>
-              )}
-            </>
-          ) : (
-            <div className="rl-gap">
-              <strong style={{ display: "block", color: "var(--ink)", marginBottom: 6 }}>
-                An honest gap
-              </strong>
-              No live chatter was retrieved for this club. We leave the panel empty rather than
-              quoting a press blurb.
+          {!recruitingOpen && recruitOverflows && (
+            <div
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                bottom: 0,
+                padding: "36px 28px 16px",
+                background: "linear-gradient(180deg, transparent, var(--bg-surface) 42%)",
+                display: "flex",
+                justifyContent: "center",
+              }}
+            >
+              <button
+                type="button"
+                className="rl-btn rl-btn-ghost"
+                aria-expanded={false}
+                onClick={() => setRecruitingOpen(true)}
+                style={{ padding: "8px 14px", borderRadius: 9, fontSize: 13 }}
+              >
+                Show full timeline
+              </button>
             </div>
           )}
+          {recruitingOpen && (
+            <button
+              type="button"
+              className="rl-btn rl-btn-ghost"
+              aria-expanded
+              onClick={() => setRecruitingOpen(false)}
+              style={{ marginTop: 14, padding: "8px 14px", borderRadius: 9, fontSize: 13 }}
+            >
+              Show less
+            </button>
+          )}
         </Card>
+      )}
       </div>
 
       {placements.length > 0 && (
@@ -816,44 +825,6 @@ export default function ClubDetail({
                 </div>
               </div>
             ))}
-          </div>
-        </Card>
-      )}
-
-      {isCornellProjectTeam(club) && (
-        <Card id="recruiting" style={{ marginTop: 16 }}>
-          <div className="rl-eyebrow">Recruiting</div>
-          <p style={{ margin: "10px 0 0", fontSize: 13.5, lineHeight: 1.55, color: "var(--ink-70)" }}>
-            {projectTeamDeadlineLine(club)}
-          </p>
-          {projectTeamTracks(club).map((track) => (
-            <div key={track.id} style={{ marginTop: 18 }}>
-              <div style={{ fontSize: 14, fontWeight: 600 }}>{track.title}</div>
-              {track.subtitle && (
-                <div style={{ fontSize: 12, color: "var(--ink-45)", marginTop: 4 }}>{track.subtitle}</div>
-              )}
-              <ol style={{ margin: "10px 0 0", paddingLeft: 18, fontSize: 13.5, lineHeight: 1.55 }}>
-                {track.steps.map((s) => (
-                  <li key={s.label} style={{ marginBottom: 8 }}>
-                    <span style={{ fontWeight: 600 }}>{s.label}</span>
-                    {s.when ? <span style={{ color: "var(--ink-50)" }}> · {s.when}</span> : null}
-                    {s.detail ? (
-                      <div style={{ color: "var(--ink-60)", fontSize: 13 }}>{s.detail}</div>
-                    ) : null}
-                  </li>
-                ))}
-              </ol>
-            </div>
-          ))}
-          <div style={{ marginTop: 12, fontSize: 12.5 }}>
-            <a
-              href={club.slug === "cornell-appdev" ? APPDEV_APPLY_URL : DUFFIELD_JOIN_URL}
-              target="_blank"
-              rel="noreferrer"
-              style={{ color: "var(--accent)" }}
-            >
-              {club.slug === "cornell-appdev" ? "cornellappdev.com/apply" : "Duffield join a project team"} ↗
-            </a>
           </div>
         </Card>
       )}
