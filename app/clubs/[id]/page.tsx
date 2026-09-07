@@ -10,6 +10,13 @@ import { getSupabase } from "@/lib/supabase";
 import { scoreClubDetailed } from "@/lib/rank";
 import { rankPeopleToMeet, sortMembersForMeet } from "@/lib/people-to-meet";
 import {
+  APPDEV_APPLY_URL,
+  DUFFIELD_JOIN_URL,
+  isCornellProjectTeam,
+  projectTeamDeadlineLine,
+  projectTeamTracks,
+} from "@/lib/recruitment-timeline";
+import {
   colorFor,
   initials,
   monogram,
@@ -139,6 +146,7 @@ export default function ClubDetail({
   }, [intel?.review, sources.length]);
 
   const deadlineHint = useMemo(() => {
+    if (isCornellProjectTeam(club)) return projectTeamDeadlineLine(club);
     const blob = [
       intel?.x_sentiment?.summary,
       ...(intel?.x_sentiment?.posts ?? []).map((p) => p.text),
@@ -149,7 +157,7 @@ export default function ClubDetail({
       /(close|closes|deadline|due|applications?)[^\n.]{0,40}(\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}|\b\d{1,2}\/\d{1,2})/i
     );
     return m ? m[0] : null;
-  }, [intel]);
+  }, [intel, club]);
 
   const path = useMemo(() => {
     const you = {
@@ -197,7 +205,14 @@ export default function ClubDetail({
         On this page
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 13, color: "rgba(0,0,0,.55)" }}>
-        {JUMP.map((j) => (
+        {(isCornellProjectTeam(club)
+          ? [
+              JUMP[0],
+              { id: "recruiting", label: "Recruiting" },
+              ...JUMP.slice(1),
+            ]
+          : JUMP
+        ).map((j) => (
           <a
             key={j.id}
             href={`#${j.id}`}
@@ -554,6 +569,44 @@ export default function ClubDetail({
           )}
         </Card>
       </div>
+
+      {isCornellProjectTeam(club) && (
+        <Card id="recruiting" style={{ marginTop: 16 }}>
+          <div className="rl-eyebrow">Recruiting</div>
+          <p style={{ margin: "10px 0 0", fontSize: 13.5, lineHeight: 1.55, color: "var(--ink-70)" }}>
+            {projectTeamDeadlineLine(club)}
+          </p>
+          {projectTeamTracks(club).map((track) => (
+            <div key={track.id} style={{ marginTop: 18 }}>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>{track.title}</div>
+              {track.subtitle && (
+                <div style={{ fontSize: 12, color: "var(--ink-45)", marginTop: 4 }}>{track.subtitle}</div>
+              )}
+              <ol style={{ margin: "10px 0 0", paddingLeft: 18, fontSize: 13.5, lineHeight: 1.55 }}>
+                {track.steps.map((s) => (
+                  <li key={s.label} style={{ marginBottom: 8 }}>
+                    <span style={{ fontWeight: 600 }}>{s.label}</span>
+                    {s.when ? <span style={{ color: "var(--ink-50)" }}> · {s.when}</span> : null}
+                    {s.detail ? (
+                      <div style={{ color: "var(--ink-60)", fontSize: 13 }}>{s.detail}</div>
+                    ) : null}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ))}
+          <div style={{ marginTop: 12, fontSize: 12.5 }}>
+            <a
+              href={club.slug === "cornell-appdev" ? APPDEV_APPLY_URL : DUFFIELD_JOIN_URL}
+              target="_blank"
+              rel="noreferrer"
+              style={{ color: "var(--accent)" }}
+            >
+              {club.slug === "cornell-appdev" ? "cornellappdev.com/apply" : "Duffield join a project team"} ↗
+            </a>
+          </div>
+        </Card>
+      )}
 
       {placements.length > 0 && (
         <Card id="placements" style={{ marginTop: 16 }}>

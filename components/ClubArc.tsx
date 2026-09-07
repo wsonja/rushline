@@ -3,6 +3,10 @@
 import { useEffect, useState } from "react";
 import type { Club } from "@/lib/types";
 import { monogram } from "@/lib/ui";
+import {
+  isCornellProjectTeam,
+  projectTeamDeadlineLine,
+} from "@/lib/recruitment-timeline";
 
 export type ArcCard = {
   name: string;
@@ -35,7 +39,7 @@ export const SAMPLE_ARC: ArcCard[] = [
     name: "Cornell AppDev",
     category: "TECH",
     score: 82,
-    deadline: "Apps close Jan 30 · coffee chats open",
+    deadline: projectTeamDeadlineLine({ slug: "cornell-appdev", name: "Cornell AppDev" }),
     badge: "@sonja · 82",
     badgeSide: "left",
     fill: SLOTS[3].fill,
@@ -66,7 +70,11 @@ export function clubsToArc(clubs: { club: Club; score: number; hops?: string | n
       category: (row.club.category ?? "club").toUpperCase(),
       score: row.score,
       hops: row.hops,
-      deadline: isFront ? row.club.tagline : null,
+      deadline: isFront
+        ? isCornellProjectTeam(row.club)
+          ? projectTeamDeadlineLine(row.club)
+          : row.club.tagline
+        : null,
       fill: slot.fill,
       light: slot.light,
       clip: slot.clip,
@@ -365,7 +373,9 @@ export function SignInPeek() {
           <div style={{ fontFamily: "var(--font-serif)", fontSize: 23, lineHeight: 1.05 }}>
             Cornell AppDev
           </div>
-          <div style={{ fontSize: 11.5, opacity: 0.8, marginTop: 6 }}>82 · apps close Jan 30</div>
+          <div style={{ fontSize: 11.5, opacity: 0.8, marginTop: 6 }}>
+            82 · {projectTeamDeadlineLine({ slug: "cornell-appdev", name: "Cornell AppDev" })}
+          </div>
         </div>
       </div>
       <div
