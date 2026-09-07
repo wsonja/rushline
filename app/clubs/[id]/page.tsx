@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useMemo, useRef, useState } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import CoffeeChatDrawer from "@/components/CoffeeChatDrawer";
@@ -12,6 +12,7 @@ import {
   APPDEV_APPLY_URL,
   DUFFIELD_JOIN_URL,
   isCornellProjectTeam,
+  projectTeamActiveTrack,
   projectTeamDeadlineLine,
   projectTeamTracks,
 } from "@/lib/recruitment-timeline";
@@ -52,15 +53,13 @@ function Card({
   id,
   children,
   style,
-  cardRef,
 }: {
   id?: string;
   children: React.ReactNode;
   style?: React.CSSProperties;
-  cardRef?: React.Ref<HTMLDivElement>;
 }) {
   return (
-    <div id={id} ref={cardRef} className="rl-card" style={{ padding: 28, borderRadius: 16, ...style }}>
+    <div id={id} className="rl-card" style={{ padding: 28, borderRadius: 16, ...style }}>
       {children}
     </div>
   );
@@ -91,10 +90,6 @@ export default function ClubDetail({
   const [activeJump, setActiveJump] = useState("review");
   const [hoverSrc, setHoverSrc] = useState<number | null>(null);
   const [recruitingOpen, setRecruitingOpen] = useState(false);
-  const reviewRef = useRef<HTMLDivElement>(null);
-  const recruitBodyRef = useRef<HTMLDivElement>(null);
-  const [reviewH, setReviewH] = useState<number | null>(null);
-  const [recruitOverflows, setRecruitOverflows] = useState(false);
 
   useEffect(() => {
     const sb = getSupabase();
@@ -145,22 +140,6 @@ export default function ClubDetail({
     if (!sources.length) return { html: text, used: [] as number[] };
     return citeReview(text, sources.length);
   }, [intel?.review, sources.length]);
-
-  useEffect(() => {
-    const el = reviewRef.current;
-    if (!el) return;
-    const measure = () => setReviewH(el.offsetHeight);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [cited, intel, club]);
-
-  useEffect(() => {
-    const body = recruitBodyRef.current;
-    if (!body || reviewH == null) return;
-    setRecruitOverflows(body.scrollHeight > reviewH - 24);
-  }, [reviewH, club, recruitingOpen]);
 
   const deadlineHint = useMemo(() => {
     if (isCornellProjectTeam(club)) return projectTeamDeadlineLine(club);
@@ -420,16 +399,7 @@ export default function ClubDetail({
         </div>
       </Card>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: isCornellProjectTeam(club) ? "1fr 1fr" : "1fr",
-          gap: 16,
-          marginTop: 16,
-          alignItems: "start",
-        }}
-      >
-      <Card id="review" cardRef={reviewRef}>
+      <Card id="review" style={{ marginTop: 16 }}>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
           <div className="rl-eyebrow">The review</div>
           <div style={{ fontSize: 12.5, color: "var(--ink-40)" }}>
@@ -495,89 +465,77 @@ export default function ClubDetail({
       </Card>
 
       {isCornellProjectTeam(club) && (
-        <Card
-          id="recruiting"
-          style={{
-            position: "relative",
-            maxHeight: recruitingOpen ? undefined : reviewH ?? undefined,
-            minHeight: recruitingOpen ? undefined : reviewH ?? undefined,
-            overflow: recruitingOpen ? "visible" : "hidden",
-            paddingBottom: !recruitingOpen && recruitOverflows ? 56 : 28,
-          }}
-        >
-          <div ref={recruitBodyRef}>
-            <div className="rl-eyebrow">Recruiting</div>
-            <p style={{ margin: "10px 0 0", fontSize: 13.5, lineHeight: 1.55, color: "var(--ink-70)" }}>
-              {projectTeamDeadlineLine(club)}
-            </p>
-            {projectTeamTracks(club).map((track) => (
-              <div key={track.id} style={{ marginTop: 18 }}>
-                <div style={{ fontSize: 14, fontWeight: 600 }}>{track.title}</div>
-                {track.subtitle && (
-                  <div style={{ fontSize: 12, color: "var(--ink-45)", marginTop: 4 }}>{track.subtitle}</div>
+        <Card id="recruiting" style={{ marginTop: 16 }}>
+          <div className="rl-eyebrow">Recruiting</div>
+          <p style={{ margin: "8px 0 0", fontSize: 15, fontWeight: 600 }}>
+            {projectTeamDeadlineLine(club)}
+          </p>
+          <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+            {(recruitingOpen
+              ? projectTeamTracks(club)
+              : [projectTeamActiveTrack(club)]
+            ).map((track) => (
+              <div key={track.id}>
+                {recruitingOpen && (
+                  <div
+                    style={{
+                      fontSize: 11.5,
+                      fontWeight: 700,
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
+                      color: "var(--ink-45)",
+                      margin: "10px 0 8px",
+                    }}
+                  >
+                    {track.title}
+                  </div>
                 )}
-                <ol style={{ margin: "10px 0 0", paddingLeft: 18, fontSize: 13.5, lineHeight: 1.55 }}>
-                  {track.steps.map((s) => (
-                    <li key={s.label} style={{ marginBottom: 8 }}>
-                      <span style={{ fontWeight: 600 }}>{s.label}</span>
-                      {s.when ? <span style={{ color: "var(--ink-50)" }}> · {s.when}</span> : null}
-                      {s.detail ? (
-                        <div style={{ color: "var(--ink-60)", fontSize: 13 }}>{s.detail}</div>
-                      ) : null}
-                    </li>
-                  ))}
-                </ol>
+                {track.steps.map((s) => (
+                  <div
+                    key={s.label}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 16,
+                      fontSize: 13.5,
+                      lineHeight: 1.45,
+                      padding: "5px 0",
+                      borderBottom: "1px solid var(--divider)",
+                    }}
+                  >
+                    <span>{s.label}</span>
+                    <span style={{ color: "var(--ink-50)", whiteSpace: "nowrap" }}>{s.when}</span>
+                  </div>
+                ))}
+                {recruitingOpen && track.subtitle && (
+                  <div style={{ fontSize: 12, color: "var(--ink-45)", marginTop: 6 }}>{track.subtitle}</div>
+                )}
               </div>
             ))}
-            <div style={{ marginTop: 12, fontSize: 12.5 }}>
-              <a
-                href={club.slug === "cornell-appdev" ? APPDEV_APPLY_URL : DUFFIELD_JOIN_URL}
-                target="_blank"
-                rel="noreferrer"
-                style={{ color: "var(--accent)" }}
-              >
-                {club.slug === "cornell-appdev" ? "cornellappdev.com/apply" : "Duffield join a project team"} ↗
-              </a>
-            </div>
           </div>
-          {!recruitingOpen && recruitOverflows && (
-            <div
-              style={{
-                position: "absolute",
-                left: 0,
-                right: 0,
-                bottom: 0,
-                padding: "36px 28px 16px",
-                background: "linear-gradient(180deg, transparent, var(--bg-surface) 42%)",
-                display: "flex",
-                justifyContent: "center",
-              }}
-            >
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 14, flexWrap: "wrap" }}>
+            {projectTeamTracks(club).length > 1 && (
               <button
                 type="button"
                 className="rl-btn rl-btn-ghost"
-                aria-expanded={false}
-                onClick={() => setRecruitingOpen(true)}
-                style={{ padding: "8px 14px", borderRadius: 9, fontSize: 13 }}
+                aria-expanded={recruitingOpen}
+                onClick={() => setRecruitingOpen((o) => !o)}
+                style={{ padding: "7px 12px", borderRadius: 9, fontSize: 13 }}
               >
-                Show full timeline
+                {recruitingOpen ? "Show less" : "Full calendar"}
               </button>
-            </div>
-          )}
-          {recruitingOpen && (
-            <button
-              type="button"
-              className="rl-btn rl-btn-ghost"
-              aria-expanded
-              onClick={() => setRecruitingOpen(false)}
-              style={{ marginTop: 14, padding: "8px 14px", borderRadius: 9, fontSize: 13 }}
+            )}
+            <a
+              href={club.slug === "cornell-appdev" ? APPDEV_APPLY_URL : DUFFIELD_JOIN_URL}
+              target="_blank"
+              rel="noreferrer"
+              style={{ fontSize: 12.5, color: "var(--accent)" }}
             >
-              Show less
-            </button>
-          )}
+              {club.slug === "cornell-appdev" ? "cornellappdev.com/apply" : "Duffield calendar"} ↗
+            </a>
+          </div>
         </Card>
       )}
-      </div>
 
       {placements.length > 0 && (
         <Card id="placements" style={{ marginTop: 16 }}>

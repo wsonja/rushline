@@ -248,6 +248,19 @@ export function projectTeamDeadlineLine(
   return "Spring recruiting opens Jan 4";
 }
 
+/** The track that matters right now — collapsed UI shows this one, not all three. */
+export function projectTeamActiveTrack(
+  club?: Pick<Club, "slug" | "name"> | null,
+  now = new Date()
+): TimelineTrack {
+  const tracks = projectTeamTracks(club);
+  if (tracks.length === 1) return tracks[0];
+  const day = ymd(now);
+  if (day <= "2026-09-03") return tracks[0];
+  if (day <= "2026-10-15") return tracks[1];
+  return tracks[2];
+}
+
 export function projectTeamTracks(
   club?: Pick<Club, "slug" | "name"> | null
 ): TimelineTrack[] {
