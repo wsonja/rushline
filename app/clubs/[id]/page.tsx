@@ -9,12 +9,11 @@ import { getSupabase } from "@/lib/supabase";
 import { scoreClubDetailed } from "@/lib/rank";
 import { rankPeopleToMeet, sortMembersForMeet } from "@/lib/people-to-meet";
 import {
-  APPDEV_APPLY_URL,
-  DUFFIELD_JOIN_URL,
-  isCornellProjectTeam,
-  projectTeamActiveTrack,
-  projectTeamDeadlineLine,
-  projectTeamTracks,
+  hasRecruitingTimeline,
+  recruitingActiveTrack,
+  recruitingDeadlineLine,
+  recruitingSource,
+  recruitingTracks,
 } from "@/lib/recruitment-timeline";
 import {
   colorFor,
@@ -142,7 +141,8 @@ export default function ClubDetail({
   }, [intel?.review, sources.length]);
 
   const deadlineHint = useMemo(() => {
-    if (isCornellProjectTeam(club)) return projectTeamDeadlineLine(club);
+    const tracked = recruitingDeadlineLine(club);
+    if (tracked) return tracked;
     const blob = [
       intel?.x_sentiment?.summary,
       ...(intel?.x_sentiment?.posts ?? []).map((p) => p.text),
@@ -197,7 +197,7 @@ export default function ClubDetail({
         On this page
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 13, color: "rgba(0,0,0,.55)" }}>
-        {(isCornellProjectTeam(club)
+        {(hasRecruitingTimeline(club)
           ? [JUMP[0], { id: "recruiting", label: "Recruiting" }, ...JUMP.slice(1)]
           : JUMP
         ).map((j) => (
@@ -258,6 +258,13 @@ export default function ClubDetail({
     );
 
   const placements = intel?.placements ?? [];
+  const activeRecruitTrack = recruitingActiveTrack(club);
+  const recruitTracks = recruitingOpen
+    ? recruitingTracks(club)
+    : activeRecruitTrack
+      ? [activeRecruitTrack]
+      : [];
+  const recruitSource = recruitingSource(club);
 
   return shell(
     <div style={{ padding: "20px 34px 34px" }}>
@@ -464,17 +471,14 @@ export default function ClubDetail({
         )}
       </Card>
 
-      {isCornellProjectTeam(club) && (
+      {hasRecruitingTimeline(club) && (
         <Card id="recruiting" style={{ marginTop: 16 }}>
           <div className="rl-eyebrow">Recruiting</div>
           <p style={{ margin: "8px 0 0", fontSize: 15, fontWeight: 600 }}>
-            {projectTeamDeadlineLine(club)}
+            {recruitingDeadlineLine(club)}
           </p>
           <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
-            {(recruitingOpen
-              ? projectTeamTracks(club)
-              : [projectTeamActiveTrack(club)]
-            ).map((track) => (
+            {recruitTracks.map((track) => (
               <div key={track.id}>
                 {recruitingOpen && (
                   <div
@@ -514,7 +518,7 @@ export default function ClubDetail({
             ))}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 14, flexWrap: "wrap" }}>
-            {projectTeamTracks(club).length > 1 && (
+            {recruitingTracks(club).length > 1 && (
               <button
                 type="button"
                 className="rl-btn rl-btn-ghost"
@@ -525,14 +529,16 @@ export default function ClubDetail({
                 {recruitingOpen ? "Show less" : "Full calendar"}
               </button>
             )}
-            <a
-              href={club.slug === "cornell-appdev" ? APPDEV_APPLY_URL : DUFFIELD_JOIN_URL}
-              target="_blank"
-              rel="noreferrer"
-              style={{ fontSize: 12.5, color: "var(--accent)" }}
-            >
-              {club.slug === "cornell-appdev" ? "cornellappdev.com/apply" : "Duffield calendar"} ↗
-            </a>
+            {recruitSource && (
+              <a
+                href={recruitSource.url}
+                target="_blank"
+                rel="noreferrer"
+                style={{ fontSize: 12.5, color: "var(--accent)" }}
+              >
+                {recruitSource.label} ↗
+              </a>
+            )}
           </div>
         </Card>
       )}

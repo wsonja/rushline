@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import type { Club } from "@/lib/types";
 import { monogram } from "@/lib/ui";
 import {
-  isCornellProjectTeam,
   projectTeamDeadlineLine,
+  recruitingDeadlineLine,
 } from "@/lib/recruitment-timeline";
 
 export type ArcCard = {
@@ -71,9 +71,7 @@ export function clubsToArc(clubs: { club: Club; score: number; hops?: string | n
       score: row.score,
       hops: row.hops,
       deadline: isFront
-        ? isCornellProjectTeam(row.club)
-          ? projectTeamDeadlineLine(row.club)
-          : row.club.tagline
+        ? recruitingDeadlineLine(row.club) ?? row.club.tagline
         : null,
       fill: slot.fill,
       light: slot.light,
